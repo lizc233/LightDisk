@@ -52,19 +52,19 @@
           <div class="storage-info">
             <span class="storage-label">存储空间</span>
             <el-progress
-                :percentage="40"
+                :percentage="storagePercentage"
                 :stroke-width="8"
                 stroke-linecap="round"
                 :show-text="false"
                 class="storage-bar"
             />
-            <span class="storage-text">2.0GB / 5.0GB</span>
+            <span class="storage-text">{{ formattedUsed }} / {{ formattedTotal }}</span>
           </div>
 
           <el-dropdown trigger="click">
             <div class="user-profile">
               <el-avatar :size="32" src="https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png" />
-              <span class="username">李炤辰</span>
+              <span class="username">{{ userInfo.username }}</span>
             </div>
             <template #dropdown>
               <el-dropdown-menu>
@@ -91,33 +91,52 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed, onMounted } from 'vue' // 🌟 修复 ref 未定义报错
 import { useRoute } from 'vue-router'
 import { Document, Share, Delete, Setting } from '@element-plus/icons-vue'
+import request from '@/utils/request' // 🌟 引入请求工具
 
 const route = useRoute()
 
-// 当前激活的菜单
-const activeMenu = computed(() => route.path)
+// --- 1. 用户与容量状态 (由加载中状态开始) ---
+const userInfo = ref({
+  username: '读取中...',
+  usedSpace: 0,
+  totalSpace: 10737418240 // 默认 10GB
+})
 
-// 当前页面名称显示
+// --- 2. 修正菜单映射路径 (加上 /app/) ---
 const currentPageName = computed(() => {
   const map = {
-    '/disk': '全部文件',
-    '/share': '我的分享',
-    '/recycle': '回收站',
-    '/admin': '后台管理'
+    '/app/disk': '全部文件',
+    '/app/share': '我的分享',
+    '/app/recycle': '回收站',
+    '/app/admin': '后台管理'
   }
   return map[route.path] || '网盘'
 })
 
-// 模拟公告数据
-const notices = [
-  "🎉 LightDisk V2.0 视觉升级完成！",
-  "🚀 新增 Redis 缓存优化，访问更丝滑。",
-  "💎 VIP 会员特权现已开启预览版。",
-  "⚡️ 修复了回收站批量还原的 Bug。"
-]
+// --- 3. 计算属性：格式化容量和百分比 ---
+const storagePercentage = computed(() => (userInfo.value.usedSpace / userInfo.value.totalSpace) * 100)
+const formattedUsed = computed(() => (userInfo.value.usedSpace / (1024 ** 3)).toFixed(1) + 'GB')
+const formattedTotal = computed(() => (userInfo.value.totalSpace / (1024 ** 3)).toFixed(1) + 'GB')
+
+// --- 4. 获取真实数据 ---
+const fetchUserData = async () => {
+  try {
+    const res = await request.get('/file/user/info')
+    userInfo.value = res.data
+  } catch (e) {
+    console.error('用户信息同步失败', e)
+  }
+}
+
+onMounted(() => {
+  fetchUserData()
+})
+
+const activeMenu = computed(() => route.path)
+const notices = ["🎉 LightDisk V2.0 视觉升级完成！", "🚀 新增 Redis 缓存优化", "💎 VIP 会员特权开启"]
 </script>
 
 <style scoped>

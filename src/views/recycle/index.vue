@@ -32,11 +32,9 @@
 
       <div class="toolbar-right">
         <el-radio-group v-model="viewMode" size="default">
-          <el-radio-button label="table" title="列表视图">
-            <el-icon><Menu /></el-icon>
+          <el-radio-button value="table" title="列表视图"> <el-icon><Menu /></el-icon>
           </el-radio-button>
-          <el-radio-button label="grid" title="网格视图">
-            <el-icon><Grid /></el-icon>
+          <el-radio-button value="grid" title="网格视图"> <el-icon><Grid /></el-icon>
           </el-radio-button>
         </el-radio-group>
       </div>
@@ -128,6 +126,7 @@
 <script setup>
 import {ref, computed, onMounted} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
+import request from '@/utils/request'
 // 引入图标
 import {Search, RefreshLeft, Delete, Menu, Grid, Document, Picture, VideoCamera} from '@element-plus/icons-vue'
 
@@ -136,38 +135,8 @@ const loading = ref(false)
 const searchKeyword = ref('')
 const viewMode = ref('table') // 'table' 或 'grid'
 const selectedFiles = ref([])
+const fileList = ref([])
 
-// 模拟后端数据 (你可以替换成真实的 axios 请求)
-const fileList = ref([
-  {
-    id: 1,
-    name: '项目架构图.png',
-    size: 2560000,
-    type: 'image',
-    deleteTime: '2023-10-25 10:00',
-    expireDays: 2,
-    thumbUrl: 'https://images.unsplash.com/photo-1618401471353-b98afee0b2eb?auto=format&fit=crop&w=200&q=80',
-    selected: false
-  },
-  {
-    id: 2,
-    name: 'Q3财务报表.pdf',
-    size: 1048576,
-    type: 'pdf',
-    deleteTime: '2023-10-26 14:30',
-    expireDays: 15,
-    selected: false
-  },
-  {
-    id: 3,
-    name: '后端接口文档.docx',
-    size: 512000,
-    type: 'doc',
-    deleteTime: '2023-10-20 09:15',
-    expireDays: 7,
-    selected: false
-  },
-])
 
 // ==== 计算属性 ====
 // 前端本地搜索过滤
@@ -178,12 +147,40 @@ const filteredList = computed(() => {
 
 // ==== 方法定义 ====
 
-// 模拟获取数据
-const fetchData = () => {
+// 2.  fetchData 方法，请求后端真实接口
+const fetchData = async () => {
   loading.value = true
-  setTimeout(() => {
+  try {
+    const res = await request.get('/file/recycle/list')
+
+    fileList.value = res.data.map(item => {
+      // 🌟 修复：兼容处理删除时间，防止数组/对象导致 replace 崩溃
+      let timeStr = '未知时间'
+      if (item.deleteTime) {
+        if (typeof item.deleteTime === 'string') {
+          timeStr = item.deleteTime.replace('T', ' ').substring(0, 19)
+        } else if (Array.isArray(item.deleteTime)) {
+          const [y, m, d, h, min] = item.deleteTime
+          timeStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')} ${String(h || 0).padStart(2, '0')}:${String(min || 0).padStart(2, '0')}`
+        }
+      }
+
+      return {
+        id: item.id,
+        name: item.fileName || item.name,
+        size: item.fileSize || item.size || 0,
+        type: item.type || 'file', // 🌟 这里依赖后端 RecycleVO 里的 type 属性
+        deleteTime: timeStr,
+        expireDays: 30,
+        selected: false,
+        isFolder: item.type === 'folder'
+      }
+    })
+  } catch (error) {
+    console.error('获取回收站失败:', error)
+  } finally {
     loading.value = false
-  }, 800) // 假装请求了0.8秒
+  }
 }
 
 // 表格多选事件
@@ -198,6 +195,8 @@ const syncGridSelection = () => {
 
 // 获取文件图标 (根据类型)
 const getFileIcon = (row) => {
+  // 🌟 优先判断是不是文件夹
+  if (row.type === 'folder' || row.isFolder) return 'Folder'
   if (row.type === 'image') return 'Picture'
   if (row.type === 'video') return 'VideoCamera'
   return 'Document'
