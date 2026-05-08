@@ -23,7 +23,12 @@
           <el-icon><Delete /></el-icon>
           <span>回收站</span>
         </el-menu-item>
-        <el-menu-item index="/app/admin">
+        <el-menu-item v-if="userStore.userInfo?.role !== 0" index="/app/ai">
+          <el-icon><ChatDotRound /></el-icon>
+          <span>AI 助手</span>
+        </el-menu-item>
+
+        <el-menu-item v-if="userStore.userInfo?.role === 1" index="/app/admin">
           <el-icon><Setting /></el-icon>
           <span>后台管理</span>
         </el-menu-item>
@@ -61,16 +66,16 @@
             <span class="storage-text">{{ formattedUsed }} / {{ formattedTotal }}</span>
           </div>
 
-          <el-dropdown trigger="click">
+          <el-dropdown trigger="click" @command="handleCommand">
             <div class="user-profile">
-              <el-avatar :size="32" src="https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png" />
-              <span class="username">{{ userInfo.username }}</span>
+              <el-avatar :size="32" :src="userStore.userInfo?.avatar || 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png'" />
+              <span class="username">{{ userStore.userInfo?.username || '未命名用户' }}</span>
             </div>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item>个人中心</el-dropdown-item>
-                <el-dropdown-item>设置</el-dropdown-item>
-                <el-dropdown-item divided style="color: #f56c6c;">退出登录</el-dropdown-item>
+                <el-dropdown-item command="profile">个人中心</el-dropdown-item>
+                <el-dropdown-item command="settings">设置</el-dropdown-item>
+                <el-dropdown-item command="logout" divided style="color: #f56c6c;">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -92,15 +97,18 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue' // 🌟 修复 ref 未定义报错
-import { useRoute } from 'vue-router'
-import { Document, Share, Delete, Setting } from '@element-plus/icons-vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Document, Share, Delete, Setting , ChatDotRound } from '@element-plus/icons-vue'
 import request from '@/utils/request' // 🌟 引入请求工具
+import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
+const router = useRouter()
+const userStore = useUserStore()
 
 // --- 1. 用户与容量状态 (由加载中状态开始) ---
-const userInfo = ref({
-  username: '读取中...',
+const storageInfo = ref({
   usedSpace: 0,
   totalSpace: 10737418240 // 默认 10GB
 })
@@ -117,17 +125,27 @@ const currentPageName = computed(() => {
 })
 
 // --- 3. 计算属性：格式化容量和百分比 ---
-const storagePercentage = computed(() => (userInfo.value.usedSpace / userInfo.value.totalSpace) * 100)
-const formattedUsed = computed(() => (userInfo.value.usedSpace / (1024 ** 3)).toFixed(1) + 'GB')
-const formattedTotal = computed(() => (userInfo.value.totalSpace / (1024 ** 3)).toFixed(1) + 'GB')
+const storagePercentage = computed(() => (storageInfo.value.usedSpace / storageInfo.value.totalSpace) * 100 || 0)
+const formattedUsed = computed(() => (storageInfo.value.usedSpace / (1024 ** 3)).toFixed(1) + 'GB')
+const formattedTotal = computed(() => (storageInfo.value.totalSpace / (1024 ** 3)).toFixed(1) + 'GB')
 
 // --- 4. 获取真实数据 ---
 const fetchUserData = async () => {
   try {
     const res = await request.get('/file/user/info')
-    userInfo.value = res.data
+    // 假设后端返回的是 { usedSpace: xxx, totalSpace: xxx }
+    storageInfo.value = res.data
   } catch (e) {
-    console.error('用户信息同步失败', e)
+    console.error('容量信息同步失败', e)
+  }
+}
+const handleCommand = (command) => {
+  if (command === 'logout') {
+    userStore.logout() // 调用 store 里的清空方法
+    ElMessage.success('已安全退出')
+    router.push('/login') // 跳转回登录页
+  } else if (command === 'profile') {
+    router.push('/app/profile') // 跳转到你即将要写的个人中心
   }
 }
 

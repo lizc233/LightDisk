@@ -105,8 +105,10 @@ import {ref, reactive, onMounted, onUnmounted} from 'vue'
 import axios from 'axios'
 import {useRouter} from 'vue-router'
 import {ElMessage} from 'element-plus'
+import { useUserStore } from '@/stores/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 const loginForm = reactive({
   username: '',
   password: ''
@@ -164,9 +166,15 @@ const handleLogin = async () => {
     })
 
     if (res.data.code === 1) {
+      // 1. 根据后端实际返回的 LoginVO，只解构出这三个字段
       const { token, id, username } = res.data.data
-      localStorage.setItem('token', token)
-      localStorage.setItem('userInfo', JSON.stringify({ id, username }))
+
+      // 2. 存入 Token (注意：你后端已经加了 "Bearer " 前缀，前端直接存就行)
+      userStore.setToken(token)
+
+      // 3. 存入用户信息 (只传 id 和 username，没有 avatar 就不传)
+      userStore.setUserInfo({ id, username })
+
       ElMessage.success('欢迎回来，' + username)
       router.push('/app/disk')
     } else {

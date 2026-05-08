@@ -45,6 +45,17 @@ const routes = [
         path: 'admin',
         name: 'Admin',
         component: () => import('@/views/admin/index.vue')
+      },
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: () => import('@/views/profile/index.vue')
+      },
+      // 在 /app 的 children 里加上：
+      {
+        path: 'ai',
+        name: 'AiAssistant',
+        component: () => import('@/views/ai/index.vue')
       }
     ]
   }
