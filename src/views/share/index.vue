@@ -105,7 +105,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, VideoCamera, Picture, CopyDocument, CircleClose, Delete } from '@element-plus/icons-vue'
-// import request from '@/utils/request' // 等后端接口写好后取消注释
+import request from '@/utils/request' // 已解除注释，引入封装好的 axios
 
 const tableRef = ref(null)
 const tableData = ref([])
@@ -116,59 +116,47 @@ const currentPage = ref(1)
 const pageSize = ref(50)
 const total = ref(0)
 
-// 计算有效分享数量
+// 计算有效分享数量 (直接使用后端传来的 expired 字段)
 const validShareCount = computed(() => {
-  return tableData.value.filter(item => !getStatusInfo(item).isExpired).length
+  return tableData.value.filter(item => !item.expired).length
 })
 
-// 加载分享列表
+// 核心：加载真实的分享列表
 const loadShareList = async () => {
   loading.value = true
   try {
-    /* // 真实后端请求示例：
     const res = await request.post('/share/list', {
       pageNum: currentPage.value,
       pageSize: pageSize.value
     })
+    // 假设你的 request 拦截器已经处理了 Result.success 剥离
+    // 如果没有剥离，请改为 res.data.data.records
     tableData.value = res.data.records
     total.value = res.data.total
-    */
-
-    // --- 以下为模拟数据，方便你预览前端效果 ---
-    setTimeout(() => {
-      tableData.value = [
-        { id: 1, fileName: '2026-项目启动计划书.pdf', shareTime: '2026-05-08 10:20', expireType: 0, views: 12, saves: 3, url: 'http://localhost:5173/s/abcd123', code: '8888' },
-        { id: 2, fileName: '毕业设计-架构图.png', shareTime: '2026-05-07 15:30', expireType: 7, expireTime: '2026-05-14 15:30', views: 5, saves: 1, url: 'http://localhost:5173/s/efgh456', code: '6666' },
-        { id: 3, fileName: 'LightDisk-演示视频.mp4', shareTime: '2026-04-01 09:00', expireType: 1, expireTime: '2026-04-02 09:00', views: 45, saves: 12, url: 'http://localhost:5173/s/xyz987', code: '1234' } // 这是一个过期的
-      ]
-      total.value = 3
-      loading.value = false
-    }, 500)
-    // --- 模拟数据结束 ---
-
   } catch (error) {
     console.error('获取分享列表失败:', error)
+    ElMessage.error('获取分享列表失败')
+  } finally {
     loading.value = false
   }
 }
 
-// 状态计算逻辑 (核心)
+// 状态计算逻辑 (利用后端的 status 和 expired 字段精简代码)
 const getStatusInfo = (row) => {
-  if (row.expireType === 0) {
+  if (row.status === 0 || row.expired) {
+    return { text: '已失效', type: 'info', effect: 'dark', isExpired: true }
+  }
+  if (!row.expireTime) {
     return { text: '永久有效', type: 'success', effect: 'light', isExpired: false }
   }
 
-  // 简单判断是否过期 (实际项目中建议后端直接返回一个 isExpired 字段，前端少算时间)
+  // 计算剩余天数 (前端做简单展示)
   const now = new Date().getTime()
-  const expire = new Date(row.expireTime).getTime()
+  // 注意：后端返回的 expireTime 是 "yyyy-MM-dd HH:mm:ss" 字符串
+  const expire = new Date(row.expireTime.replace(/-/g, '/')).getTime()
+  const daysLeft = Math.ceil((expire - now) / (1000 * 60 * 60 * 24))
 
-  if (now > expire) {
-    return { text: '已失效', type: 'info', effect: 'dark', isExpired: true }
-  } else {
-    // 计算剩余天数
-    const daysLeft = Math.ceil((expire - now) / (1000 * 60 * 60 * 24))
-    return { text: `${daysLeft} 天后失效`, type: 'primary', effect: 'light', isExpired: false }
-  }
+  return { text: `${daysLeft} 天后失效`, type: 'primary', effect: 'light', isExpired: false }
 }
 
 // 勾选变化
@@ -176,16 +164,15 @@ const handleSelectionChange = (val) => {
   selectedRows.value = val
 }
 
-// 复制链接
+// 复制链接 (字段对齐后端的 shareUrl 和 extractCode)
 const copyLink = async (row) => {
   if (getStatusInfo(row).isExpired) return
 
-  const textToCopy = `分享文件：${row.fileName}\n链接：${row.url}\n提取码：${row.code}`
+  const textToCopy = `分享文件：${row.fileName}\n链接：${row.shareUrl}\n提取码：${row.extractCode}`
   try {
     await navigator.clipboard.writeText(textToCopy)
     ElMessage.success('链接及提取码已复制到剪贴板')
   } catch (err) {
-    // 兼容旧版浏览器
     const input = document.createElement('textarea')
     input.value = textToCopy
     document.body.appendChild(input)
@@ -204,7 +191,8 @@ const cancelShare = (row) => {
     type: 'warning',
     confirmButtonClass: 'el-button--danger'
   }).then(async () => {
-    // await request.post(`/share/cancel`, { ids: [row.id] })
+    // 对应后端的 ShareCreateDTO.shareIds
+    await request.post(`/share/cancel`, { shareIds: [row.id] })
     ElMessage.success('已取消分享')
     loadShareList()
   }).catch(() => {})
@@ -219,7 +207,7 @@ const batchCancelShare = () => {
     confirmButtonClass: 'el-button--danger'
   }).then(async () => {
     const ids = selectedRows.value.map(row => row.id)
-    // await request.post(`/share/cancel`, { ids })
+    await request.post(`/share/cancel`, { shareIds: ids })
     ElMessage.success(`已成功取消 ${ids.length} 个分享`)
     tableRef.value.clearSelection()
     loadShareList()
@@ -233,7 +221,7 @@ const clearExpired = () => {
     cancelButtonText: '取消',
     type: 'info'
   }).then(async () => {
-    // await request.post(`/share/clear-expired`)
+    await request.post(`/share/clear-expired`)
     ElMessage.success('失效记录已清理')
     loadShareList()
   }).catch(() => {})
@@ -250,7 +238,7 @@ const handleCurrentChange = (val) => {
   loadShareList()
 }
 
-// 图标处理 (复用 Disk.vue 的逻辑保持一致性)
+// 图标处理
 const getIconComponent = (filename) => {
   if (!filename) return Document
   const ext = filename.split('.').pop().toLowerCase()

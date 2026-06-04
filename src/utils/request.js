@@ -12,7 +12,9 @@ request.interceptors.request.use(
     (config) => {
         const userStore = useUserStore()
         if (userStore.token) {
-            config.headers.Authorization = `Bearer ${userStore.token}`
+            config.headers.Authorization = userStore.token.startsWith('Bearer ')
+                ? userStore.token
+                : `Bearer ${userStore.token}`
         }
         return config
     },

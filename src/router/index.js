@@ -3,13 +3,10 @@ import BasicLayout from '../layouts/BasicLayout.vue'
 
 const routes = [
   {
-    path: '/', // 根路径，对应浏览器直接访问 http://localhost:5173/
+    path: '/',
     name: 'Landing',
     component: () => import('@/views/Landing.vue'),
-    meta: {
-      requiresAuth: false, // 首页不需要鉴权
-      layout: 'empty' // 或者别的，只要不使用 BasicLayout 即可
-    }
+    meta: { requiresAuth: false, layout: 'empty' }
   },
   {
     path: '/login',
@@ -18,16 +15,16 @@ const routes = [
   },
   {
     path: '/register',
-    // 确保这里的路径和你 Register.vue 的实际存放位置一致
-    component: () => import('../views/Register.vue')
+    name: 'Register',
+    component: () => import('@/views/Register.vue')
   },
   {
-    path: '/app', // 网盘系统入口
+    path: '/app',
     component: BasicLayout,
-    meta: { requiresAuth: true }, // 需要登录
+    meta: { requiresAuth: true },
     children: [
       {
-        path: 'disk',  // 访问路径是 http://localhost:5173/app/disk
+        path: 'disk',
         name: 'Disk',
         component: () => import('@/views/Disk.vue')
       },
@@ -51,7 +48,11 @@ const routes = [
         name: 'Profile',
         component: () => import('@/views/profile/index.vue')
       },
-      // 在 /app 的 children 里加上：
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('@/views/settings/index.vue')
+      },
       {
         path: 'ai',
         name: 'AiAssistant',
@@ -63,20 +64,16 @@ const routes = [
 
 const router = createRouter({
   history: createWebHistory(),
-  routes,
+  routes
 })
 
-// 全局路由守卫
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
-
   if (to.matched.some(record => record.meta.requiresAuth) && !token) {
-    // 没登录，踢回登录页
     next('/login')
-  } else {
-    // 已登录或访问不需要权限的页面，放行
-    next()
+    return
   }
+  next()
 })
 
 export default router

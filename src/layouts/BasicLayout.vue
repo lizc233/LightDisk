@@ -1,16 +1,12 @@
 <template>
   <el-container class="layout-container">
-    <el-aside width="240px" class="aside-glass">
+    <el-aside width="240px" class="aside-panel">
       <div class="logo-section">
         <div class="logo-icon">L</div>
         <span class="logo-text">LightDisk</span>
       </div>
 
-      <el-menu
-          :default-active="activeMenu"
-          class="side-menu"
-          router
-      >
+      <el-menu :default-active="activeMenu" class="side-menu" router>
         <el-menu-item index="/app/disk">
           <el-icon><Document /></el-icon>
           <span>全部文件</span>
@@ -21,13 +17,14 @@
         </el-menu-item>
         <el-menu-item index="/app/recycle">
           <el-icon><Delete /></el-icon>
-          <span>回收站</span>
+          <el-badge :value="recycleReminderCount" :hidden="recycleReminderCount <= 0" class="menu-badge">
+            <span>回收站</span>
+          </el-badge>
         </el-menu-item>
         <el-menu-item v-if="userStore.userInfo?.role !== 0" index="/app/ai">
           <el-icon><ChatDotRound /></el-icon>
           <span>AI 助手</span>
         </el-menu-item>
-
         <el-menu-item v-if="userStore.userInfo?.role === 1" index="/app/admin">
           <el-icon><Setting /></el-icon>
           <span>后台管理</span>
@@ -36,7 +33,7 @@
 
       <div class="notice-card">
         <div class="notice-title">系统公告</div>
-        <el-carousel height="80px" direction="vertical" :autoplay="true" indicator-position="none">
+        <el-carousel height="88px" direction="vertical" :autoplay="true" indicator-position="none">
           <el-carousel-item v-for="item in notices" :key="item">
             <p class="notice-item">{{ item }}</p>
           </el-carousel-item>
@@ -44,8 +41,8 @@
       </div>
     </el-aside>
 
-    <el-container class="main-container">
-      <el-header class="header-glass">
+    <el-container class="main-shell">
+      <el-header class="header-panel">
         <div class="header-left">
           <el-breadcrumb separator="/">
             <el-breadcrumb-item>首页</el-breadcrumb-item>
@@ -57,19 +54,29 @@
           <div class="storage-info">
             <span class="storage-label">存储空间</span>
             <el-progress
-                :percentage="storagePercentage"
-                :stroke-width="8"
-                stroke-linecap="round"
-                :show-text="false"
-                class="storage-bar"
+              :percentage="storagePercentage"
+              :stroke-width="8"
+              stroke-linecap="round"
+              :show-text="false"
+              class="storage-bar"
             />
             <span class="storage-text">{{ formattedUsed }} / {{ formattedTotal }}</span>
           </div>
 
+          <el-tag effect="dark" :type="preferencesStore.isDark ? 'success' : 'info'" round>
+            {{ preferencesStore.isDark ? '暗黑主题' : '明亮主题' }}
+          </el-tag>
+
           <el-dropdown trigger="click" @command="handleCommand">
             <div class="user-profile">
-              <el-avatar :size="32" :src="userStore.userInfo?.avatar || 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png'" />
-              <span class="username">{{ userStore.userInfo?.username || '未命名用户' }}</span>
+              <el-avatar
+                :size="34"
+                :src="userStore.userInfo?.avatar || 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png'"
+              />
+              <div class="user-meta">
+                <span class="username">{{ userStore.userInfo?.username || '未命名用户' }}</span>
+                <small>{{ userStore.userInfo?.levelName || '普通用户' }}</small>
+              </div>
             </div>
             <template #dropdown>
               <el-dropdown-menu>
@@ -96,56 +103,89 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue' // 🌟 修复 ref 未定义报错
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Document, Share, Delete, Setting , ChatDotRound } from '@element-plus/icons-vue'
-import request from '@/utils/request' // 🌟 引入请求工具
+import { ChatDotRound, Delete, Document, Setting, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
+import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
+import { usePreferencesStore } from '@/stores/preferences'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const preferencesStore = usePreferencesStore()
 
-// --- 1. 用户与容量状态 (由加载中状态开始) ---
 const storageInfo = ref({
-  usedSpace: 0,
-  totalSpace: 10737418240 // 默认 10GB
+  usedSpace: Number(userStore.userInfo?.usedSpace || 0),
+  totalSpace: Number(userStore.userInfo?.totalSpace || 10 * 1024 ** 3)
 })
 
-// --- 2. 修正菜单映射路径 (加上 /app/) ---
 const currentPageName = computed(() => {
   const map = {
     '/app/disk': '全部文件',
     '/app/share': '我的分享',
     '/app/recycle': '回收站',
-    '/app/admin': '后台管理'
+    '/app/admin': '后台管理',
+    '/app/profile': '个人中心',
+    '/app/settings': '设置中心',
+    '/app/ai': 'AI 助手'
   }
   return map[route.path] || '网盘'
 })
 
-// --- 3. 计算属性：格式化容量和百分比 ---
-const storagePercentage = computed(() => (storageInfo.value.usedSpace / storageInfo.value.totalSpace) * 100 || 0)
-const formattedUsed = computed(() => (storageInfo.value.usedSpace / (1024 ** 3)).toFixed(1) + 'GB')
-const formattedTotal = computed(() => (storageInfo.value.totalSpace / (1024 ** 3)).toFixed(1) + 'GB')
+const storagePercentage = computed(() => {
+  if (!storageInfo.value.totalSpace) {
+    return 0
+  }
+  return Math.min((storageInfo.value.usedSpace / storageInfo.value.totalSpace) * 100, 100)
+})
 
-// --- 4. 获取真实数据 ---
+const formatSpace = (value) => {
+  const bytes = Number(value || 0)
+  const gb = bytes / 1024 ** 3
+  if (gb >= 1) {
+    return `${gb.toFixed(gb >= 100 ? 0 : 2)} GB`
+  }
+  const mb = bytes / 1024 ** 2
+  return `${mb.toFixed(2)} MB`
+}
+
+const formattedUsed = computed(() => formatSpace(storageInfo.value.usedSpace))
+const formattedTotal = computed(() => formatSpace(storageInfo.value.totalSpace))
+const recycleReminderCount = computed(() => Number(userStore.userInfo?.recycleReminderCount || 0))
+
 const fetchUserData = async () => {
   try {
     const res = await request.get('/file/user/info')
-    // 假设后端返回的是 { usedSpace: xxx, totalSpace: xxx }
-    storageInfo.value = res.data
-  } catch (e) {
-    console.error('容量信息同步失败', e)
+    storageInfo.value = {
+      usedSpace: Number(res.data?.usedSpace || 0),
+      totalSpace: Number(res.data?.totalSpace || 0)
+    }
+    userStore.setUserInfo({
+      ...userStore.userInfo,
+      ...res.data
+    })
+  } catch (error) {
+    console.error('同步用户信息失败', error)
   }
 }
+
 const handleCommand = (command) => {
   if (command === 'logout') {
-    userStore.logout() // 调用 store 里的清空方法
+    userStore.logout()
     ElMessage.success('已安全退出')
-    router.push('/login') // 跳转回登录页
-  } else if (command === 'profile') {
-    router.push('/app/profile') // 跳转到你即将要写的个人中心
+    router.push('/login')
+    return
+  }
+
+  if (command === 'profile') {
+    router.push('/app/profile')
+    return
+  }
+
+  if (command === 'settings') {
+    router.push('/app/settings')
   }
 }
 
@@ -154,56 +194,58 @@ onMounted(() => {
 })
 
 const activeMenu = computed(() => route.path)
-const notices = ["🎉 LightDisk V2.0 视觉升级完成！", "🚀 新增 Redis 缓存优化", "💎 VIP 会员特权开启"]
+const notices = [
+  '回收站现已支持 30 天有效期与容量限制',
+  '设置中心已接入主题与上传偏好',
+  '个人中心支持真实 VIP 信息与邮箱绑定'
+]
 </script>
 
 <style scoped>
-/* 基础容器 */
 .layout-container {
   height: 100vh;
-  background-color: #f5f7fa; /* 非常浅的灰白色背景 */
+  background:
+    radial-gradient(circle at top left, rgba(16, 163, 127, 0.12), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.1), transparent 24%),
+    var(--app-bg);
   overflow: hidden;
 }
 
-/* 侧边栏毛玻璃感 */
-.aside-glass {
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(12px);
-  border-right: 1px solid rgba(255, 255, 255, 0.3);
+.aside-panel {
   display: flex;
   flex-direction: column;
-  box-shadow: 4px 0 15px rgba(0, 0, 0, 0.02);
-  z-index: 10;
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  border-right: 1px solid var(--border-color);
+  box-shadow: var(--shadow-soft);
 }
 
 .logo-section {
-  padding: 30px 24px;
+  padding: 28px 24px;
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
 .logo-icon {
-  width: 32px;
-  height: 32px;
-  background: linear-gradient(135deg, #409eff, #79bbff);
-  color: white;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  font-weight: bold;
-  box-shadow: 0 4px 10px rgba(64, 158, 255, 0.3);
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), #19c37d);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(16, 163, 127, 0.22);
 }
 
 .logo-text {
   font-size: 20px;
-  font-weight: 600;
-  color: #303133;
-  letter-spacing: 0.5px;
+  font-weight: 700;
+  color: var(--text-primary);
 }
 
-/* 菜单样式与交互感应 */
 .side-menu {
   border-right: none !important;
   background: transparent !important;
@@ -212,134 +254,140 @@ const notices = ["🎉 LightDisk V2.0 视觉升级完成！", "🚀 新增 Redis
 
 .side-menu :deep(.el-menu-item) {
   margin: 8px 16px;
-  border-radius: 12px;
-  height: 50px;
-  line-height: 50px;
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  height: 48px;
+  border-radius: 14px;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
 }
 
 .side-menu :deep(.el-menu-item:hover) {
-  background-color: rgba(64, 158, 255, 0.1) !important;
-  transform: translateX(5px); /* 鼠标滑动弹出感 */
-  color: #409eff;
+  background: var(--accent-soft) !important;
+  color: var(--accent);
+  transform: translateX(4px);
 }
 
 .side-menu :deep(.el-menu-item.is-active) {
-  background-color: #409eff !important;
+  background: linear-gradient(135deg, var(--accent), #19c37d) !important;
   color: #fff !important;
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+  box-shadow: 0 10px 24px rgba(16, 163, 127, 0.22);
 }
 
-/* 顶部 Header 毛玻璃 */
-.header-glass {
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+.notice-card {
+  margin: 16px;
+  padding: 16px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+}
+
+.notice-title {
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.notice-item {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  font-size: 12px;
+}
+
+.main-shell {
+  overflow: hidden;
+}
+
+.header-panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 30px;
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 40px;
+  gap: 20px;
 }
 
 .storage-info {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
+  gap: 5px;
 }
 
-.storage-label {
-  font-size: 11px;
-  color: #909399;
+.storage-label,
+.storage-text {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .storage-bar {
-  width: 120px;
+  width: 140px;
 }
 
-.storage-text {
-  font-size: 11px;
-  color: #606266;
+.menu-badge :deep(.el-badge__content) {
+  transform: translateY(-2px);
 }
 
 .user-profile {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 6px 10px;
+  border-radius: 18px;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 20px;
-  transition: background 0.3s;
+  transition: background-color 0.2s ease;
 }
 
 .user-profile:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--accent-soft);
+}
+
+.user-meta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
 }
 
 .username {
+  color: var(--text-primary);
   font-size: 14px;
-  font-weight: 500;
-  color: #303133;
+  font-weight: 600;
 }
 
-/* 内容卡片 */
+.user-meta small {
+  color: var(--text-secondary);
+}
+
 .page-main {
   padding: 24px;
+  overflow-y: auto;
 }
 
 .content-card {
-  background: #ffffff;
-  border-radius: 16px;
-  min-height: calc(100vh - 130px);
+  min-height: calc(100vh - 126px);
+  background: var(--surface-solid);
+  border: 1px solid var(--border-color);
+  border-radius: 22px;
   padding: 24px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04); /* 极轻阴影 */
+  box-shadow: var(--shadow-soft);
 }
 
-/* 系统公告卡片样式 */
-.notice-card {
-  margin: 20px 16px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.5);
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.8);
-}
-
-.notice-title {
-  font-size: 12px;
-  font-weight: bold;
-  color: #409eff;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.notice-item {
-  font-size: 12px;
-  color: #606266;
-  line-height: 1.6;
-  margin: 0;
-}
-
-/* 路由切换过渡动画 */
 .fade-transform-enter-active,
 .fade-transform-leave-active {
-  transition: all 0.4s;
+  transition: all 0.28s ease;
 }
 
-.fade-transform-enter-from {
-  opacity: 0;
-  transform: translateX(-15px);
-}
-
+.fade-transform-enter-from,
 .fade-transform-leave-to {
   opacity: 0;
-  transform: translateX(15px);
+  transform: translateY(10px);
 }
 </style>
