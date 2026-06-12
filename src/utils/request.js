@@ -32,6 +32,9 @@ request.interceptors.response.use(
         return res
     },
     (error) => {
+        if (error.config?.skipAuthRedirect) {
+            return Promise.reject(error)
+        }
         if (error.response?.status === 401) {
             const userStore = useUserStore()
             userStore.logout()

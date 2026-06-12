@@ -72,9 +72,9 @@
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import axios from 'axios'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import request from '@/utils/request'
 
 const router = useRouter()
 const formRef = ref(null)
@@ -108,10 +108,26 @@ const registerForm = reactive({
   confirmPassword: ''
 })
 
+const validateUsername = (rule, value, callback) => {
+  const username = (value || '').trim()
+  if (!username) {
+    callback(new Error('请输入用户名'))
+    return
+  }
+  if (username.length < 2 || username.length > 20) {
+    callback(new Error('用户名长度需在 2 到 20 个字符之间'))
+    return
+  }
+  if (!/^[\u4e00-\u9fa5A-Za-z0-9_-]+$/.test(username)) {
+    callback(new Error('用户名支持中文、字母、数字、下划线和中划线'))
+    return
+  }
+  callback()
+}
+
 const rules = {
   username: [
-    { required: true, message: '请起一个响亮的用户名', trigger: 'blur' },
-    { min: 3, max: 20, message: '长度要在 3 到 20 个字符之间', trigger: 'blur' }
+    { validator: validateUsername, trigger: 'blur' }
   ],
   password: [
     { required: true, message: '密码是必须的', trigger: 'blur' },
@@ -135,46 +151,30 @@ const rules = {
 
 const handleRegister = async () => {
   try {
-    // 1. 触发前端校验
     await formRef.value.validate()
-
-    // 2. 这里的赋值改对了！不是 .push，是直接 = true
     loading.value = true
 
-    const res = await axios.post('http://localhost:8080/api/register', {
-      username: registerForm.username,
+    const res = await request.post('/register', {
+      username: registerForm.username.trim(),
       password: registerForm.password
     })
 
-    // 3. 处理成功逻辑
-    if (res.data.code === 1) {
-      ElMessage.success('账号创建成功！')
+    if (res.code === 1 || res.code === 200) {
+      ElMessage.success(res.data || '账号创建成功')
       setTimeout(() => router.push('/login'), 1500)
-    } else {
-      // 如果后端没弹异常而是返回了错误码
-      const errorText = res.data.msg || res.data.message || '注册失败';
-      ElMessage.error(errorText);
-
-      console.log("后端返回的原始错误信息:", res.data.msg);
     }
-
   } catch (error) {
-    // --- 这里的逻辑是抓取你后端 BusinessException 的核心 ---
     if (error.response && error.response.data) {
-      // ✅ 抓取 GlobalExceptionHandler 抛出的那个“该用户名已被占用”
-      const serverMsg = error.response.data.message || error.response.data.msg || '服务器业务异常';
-      ElMessage.error(serverMsg);
-      console.error("抓到后端业务报错:", serverMsg);
-    } else if (error.name === 'ValidationError') {
-      // 仅仅是前端表单校验（如密码太短）没过，不需要额外弹窗，输入框下有红字
-      console.warn("前端校验未通过");
+      const serverMsg = error.response.data.message || error.response.data.msg || '服务器业务异常'
+      ElMessage.error(serverMsg)
+      console.error('抓到后端业务报错:', serverMsg)
+    } else if (error && typeof error === 'object' && !error.message) {
+      console.warn('前端表单校验未通过', error)
     } else {
-      // 其他网络错误（如后端没开）
-      ElMessage.error('网络连接异常，请检查后端服务');
-      console.error("未分类异常:", error);
+      ElMessage.error('网络连接异常，请检查后端服务')
+      console.error('未分类异常:', error)
     }
   } finally {
-    // 4. 无论成功失败，关掉按钮加载状态
     loading.value = false
   }
 }

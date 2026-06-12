@@ -168,11 +168,15 @@
         <el-result icon="success" title="分享链接已创建">
           <template #extra>
             <div class="copy-field">
-              <el-input v-model="shareResult.shareUrl" readonly>
+              <el-input :model-value="shareResult.shareUrl" readonly>
                 <template #append>
                   <el-button @click="copyText(shareResult.shareUrl)">复制链接</el-button>
                 </template>
               </el-input>
+            </div>
+            <div class="extract-code-line">提取码：{{ shareResult.extractCode }}</div>
+            <div class="share-copy-actions">
+              <el-button text @click="copyShareMessage()">复制链接和提取码</el-button>
             </div>
           </template>
         </el-result>
@@ -537,6 +541,12 @@ const copyText = async (text) => {
   } catch (error) {
     ElMessage.error('复制失败，请手动复制')
   }
+}
+
+const copyShareMessage = async () => {
+  if (!shareResult.value) return
+  const text = `分享文件：${currentFile.value?.name || shareResult.value.fileName}\n链接：${shareResult.value.shareUrl}\n提取码：${shareResult.value.extractCode}`
+  await copyText(text)
 }
 
 const getIconComponent = (row) => {
@@ -921,6 +931,17 @@ onMounted(async () => {
   justify-content: flex-end;
   padding: 24px 0 10px;
   margin-top: 10px;
+}
+
+.extract-code-line {
+  margin-top: 12px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.share-copy-actions {
+  margin-top: 8px;
 }
 
 :deep(.el-pagination.is-background .el-pager li:not(.is-disabled).is-active) {

@@ -2,17 +2,16 @@
   <div class="ai-page">
     <section class="hero-card">
       <div>
-        <p class="eyebrow">Mock Agent + RAG Demo</p>
+        <p class="eyebrow">LightDisk Intelligent Workspace</p>
         <h1>LightDisk AI 助手</h1>
         <p class="hero-desc">
-          这一版不接真实大模型，答案来自关键词路由、数据库检索和预置知识卡。
-          你仍然可以演示 Query 改写、多路召回、重排、来源回显和幻觉规避。
+          面向文件检索与知识问答场景，支持 Query 改写、多路召回、结果重排、来源回显和上下文辅助分析。
         </p>
       </div>
       <div class="hero-actions">
-        <el-tag type="success" effect="plain">低成本演示</el-tag>
-        <el-tag effect="plain">可写进简历</el-tag>
-        <el-tag type="warning" effect="plain">可扩展到真 AI</el-tag>
+        <el-tag type="success" effect="plain">文件智能检索</el-tag>
+        <el-tag effect="plain">问答可追溯</el-tag>
+        <el-tag type="warning" effect="plain">多策略协同</el-tag>
       </div>
     </section>
 
@@ -167,7 +166,7 @@ const thinkingSteps = [
 
 const welcomeMessage = () => ({
   role: 'ai',
-  content: `你好，${userStore.userInfo?.username || '同学'}。<br>我当前走的是低成本演示链路：<b>关键词路由 + 数据库检索 + 预置知识卡</b>。<br><br>你可以直接问：<br>1. 帮我找某个文档在哪里<br>2. 回收站里哪些文件快过期<br>3. 我分享过哪些文件<br>4. RAG / Agent / 多路召回 / 幻觉规避等面试题`
+  content: `你好，${userStore.userInfo?.username || '同学'}。<br>这里可以直接处理文件定位、分享检索、回收站提醒和知识问答。<br><br>你可以直接问：<br>1. 帮我找某个文档在哪里<br>2. 回收站里哪些文件快过期<br>3. 我分享过哪些文件<br>4. 为什么 RAG 要做 Query 改写`
 })
 
 const resetConversation = () => {
@@ -262,30 +261,34 @@ onBeforeUnmount(() => {
 .ai-page {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   max-width: 1320px;
   margin: 0 auto;
+  height: calc(100vh - 154px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 .hero-card {
   display: flex;
   justify-content: space-between;
   gap: 24px;
-  padding: 28px 30px;
+  padding: 20px 24px;
   border-radius: 28px;
   background:
     radial-gradient(circle at top right, rgba(34, 197, 94, 0.18), transparent 32%),
-    linear-gradient(135deg, #0f172a, #14213d 52%, #0b1120);
-  color: #f8fafc;
-  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);
+    linear-gradient(135deg, var(--surface-strong), var(--surface-solid) 52%, var(--surface-muted));
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-soft);
 }
 
 .eyebrow {
-  margin: 0 0 10px;
+  margin: 0 0 6px;
   font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(226, 232, 240, 0.72);
+  color: var(--text-secondary);
 }
 
 .hero-card h1 {
@@ -295,9 +298,9 @@ onBeforeUnmount(() => {
 
 .hero-desc {
   max-width: 760px;
-  margin: 12px 0 0;
-  line-height: 1.75;
-  color: rgba(226, 232, 240, 0.86);
+  margin: 8px 0 0;
+  line-height: 1.6;
+  color: var(--text-secondary);
 }
 
 .hero-actions {
@@ -305,29 +308,33 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: 10px;
   flex-wrap: wrap;
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
 .ai-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.8fr);
   gap: 20px;
-  min-height: 720px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-card,
 .panel-card {
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: var(--surface-solid);
+  border: 1px solid var(--border-color);
   border-radius: 24px;
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+  box-shadow: var(--shadow-soft);
   backdrop-filter: blur(14px);
 }
 
 .chat-card {
   display: flex;
   flex-direction: column;
-  min-height: 720px;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .chat-head {
@@ -335,29 +342,30 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 24px 24px 18px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .chat-head h2,
 .panel-card h3 {
   margin: 0;
   font-size: 18px;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .chat-head p {
-  margin: 8px 0 0;
-  color: #64748b;
+  margin: 6px 0 0;
+  color: var(--text-secondary);
   line-height: 1.6;
 }
 
 .chat-window {
   flex: 1;
-  padding: 24px;
+  min-height: 0;
+  padding: 20px;
   overflow-y: auto;
   background:
-    linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(240, 249, 255, 0.92));
+    linear-gradient(180deg, var(--surface-muted), var(--surface-solid));
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -388,9 +396,9 @@ onBeforeUnmount(() => {
 .bubble {
   padding: 14px 16px;
   border-radius: 18px;
-  background: #fff;
-  border: 1px solid rgba(226, 232, 240, 0.95);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+  background: var(--surface-solid);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-soft);
 }
 
 .message-row.is-user .bubble {
@@ -404,7 +412,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--text-secondary);
 }
 
 .message-row.is-user .bubble-role {
@@ -413,7 +421,7 @@ onBeforeUnmount(() => {
 
 .bubble-content {
   line-height: 1.8;
-  color: #0f172a;
+  color: var(--text-primary);
   word-break: break-word;
 }
 
@@ -427,7 +435,7 @@ onBeforeUnmount(() => {
 
 .thinking-status {
   font-size: 14px;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .thinking-dots {
@@ -453,16 +461,16 @@ onBeforeUnmount(() => {
 }
 
 .composer {
-  padding: 18px 24px 24px;
-  border-top: 1px solid rgba(226, 232, 240, 0.95);
-  background: #fff;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--border-color);
+  background: var(--surface-solid);
 }
 
 .quick-prompts {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .composer-box {
@@ -482,6 +490,9 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .panel-card {
@@ -496,7 +507,7 @@ onBeforeUnmount(() => {
 
 .trace-summary {
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-secondary);
   line-height: 1.6;
 }
 
@@ -514,15 +525,15 @@ onBeforeUnmount(() => {
 .capability-item {
   padding: 14px 15px;
   border-radius: 16px;
-  background: linear-gradient(180deg, #f8fafc, #f1f5f9);
-  border: 1px solid rgba(203, 213, 225, 0.75);
+  background: linear-gradient(180deg, var(--surface-muted), var(--surface-solid));
+  border: 1px solid var(--border-color);
 }
 
 .stage-label,
 .source-title,
 .capability-title {
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .stage-detail,
@@ -533,11 +544,11 @@ onBeforeUnmount(() => {
 .empty-tip {
   margin-top: 6px;
   line-height: 1.65;
-  color: #64748b;
+  color: var(--text-secondary);
 }
 
 .source-path {
-  color: #2563eb;
+  color: var(--accent);
   word-break: break-all;
 }
 
@@ -555,15 +566,26 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1080px) {
+  .ai-page {
+    height: auto;
+    overflow: visible;
+  }
+
   .ai-layout {
     grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .side-panel {
+    overflow: visible;
+    padding-right: 0;
   }
 }
 
 @media (max-width: 760px) {
   .hero-card {
     flex-direction: column;
-    padding: 22px;
+    padding: 18px;
   }
 
   .chat-card {

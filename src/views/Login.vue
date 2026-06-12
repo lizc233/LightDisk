@@ -193,6 +193,7 @@ const startForgotCountdown = () => {
       username,
       email,
       role,
+      isAdmin,
       levelName,
       usedSpace,
       totalSpace,
@@ -205,6 +206,7 @@ const startForgotCountdown = () => {
       username,
       email,
       role,
+      isAdmin,
       levelName,
       usedSpace,
       totalSpace,
@@ -533,6 +535,15 @@ onBeforeUnmount(() => {
 
 :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
   background-color: #007AFF;
+  border-color: #007AFF;
+}
+
+:deep(.el-checkbox__inner) {
+  background-color: #ffffff;
+  border-color: #c7c7cc;
+}
+
+:deep(.el-checkbox__input.is-focus .el-checkbox__inner) {
   border-color: #007AFF;
 }
 

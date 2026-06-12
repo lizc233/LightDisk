@@ -266,7 +266,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #fff;
+  background: var(--surface-solid);
   padding: 32px 48px;
 }
 
@@ -285,12 +285,12 @@ onMounted(() => {
 .title {
   font-size: 24px;
   font-weight: 700;
-  color: #1e1919;
+  color: var(--text-primary);
   margin: 0;
 }
 .stat-badge {
-  background: #f0f5ff;
-  color: #0061fe;
+  background: var(--surface-strong);
+  color: var(--accent);
   padding: 4px 12px;
   border-radius: 14px;
   font-size: 13px;
@@ -302,8 +302,8 @@ onMounted(() => {
 
 /* 批量操作栏动画与样式 */
 .batch-action-bar {
-  background: #fef0f0;
-  border: 1px solid #fde2e2;
+  background: color-mix(in srgb, var(--surface-solid) 78%, #ef4444 22%);
+  border: 1px solid color-mix(in srgb, var(--border-color) 70%, #ef4444 30%);
   border-radius: 8px;
   padding: 12px 20px;
   margin-bottom: 16px;
@@ -313,7 +313,7 @@ onMounted(() => {
 }
 .selected-count {
   font-size: 14px;
-  color: #f56c6c;
+  color: #ef4444;
   font-weight: 600;
 }
 .slide-down-enter-active,
@@ -345,20 +345,26 @@ onMounted(() => {
   flex-direction: column;
 }
 .file-name {
-  color: #1e1919;
+  color: var(--text-primary);
 }
 .status-tag {
   font-weight: 500;
   border: none;
 }
 .audit-text {
-  color: #8a94a5;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
 /* 操作按钮悬浮显示逻辑 */
 .custom-table {
   --el-table-header-text-color: #637282;
+  --el-table-bg-color: var(--surface-solid);
+  --el-table-tr-bg-color: var(--surface-solid);
+  --el-table-row-hover-bg-color: var(--surface-muted);
+  --el-table-header-bg-color: var(--surface-muted);
+  --el-table-text-color: var(--text-primary);
+  --el-table-border-color: var(--border-color);
 }
 .premium-actions {
   display: flex;
@@ -388,7 +394,7 @@ onMounted(() => {
   border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
-  color: #8a94a5;
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -396,18 +402,18 @@ onMounted(() => {
   font-size: 15px;
 }
 .action-btn:hover:not(.is-disabled) {
-  background: rgba(0, 97, 254, 0.08);
-  color: #0061fe;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .action-btn.danger:hover {
   background: rgba(250, 75, 75, 0.08);
   color: #fa4b4b;
 }
 :deep(.el-table td.el-table__cell), :deep(.el-table th.el-table__cell.is-leaf) {
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid var(--border-color);
 }
 :deep(.el-table--enable-row-hover .el-table__body tr:hover > td.el-table__cell) {
-  background-color: #fcfdfd;
+  background-color: var(--surface-muted);
 }
 
 /* 分页 */
@@ -418,6 +424,12 @@ onMounted(() => {
   margin-top: 10px;
 }
 :deep(.el-pagination.is-background .el-pager li:not(.is-disabled).is-active) {
-  background-color: #0061fe;
+  background-color: var(--accent);
+}
+
+:deep(.el-pagination button),
+:deep(.el-pagination .el-pager li) {
+  background: var(--surface-muted);
+  color: var(--text-primary);
 }
 </style>

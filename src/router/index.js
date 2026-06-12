@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import BasicLayout from '../layouts/BasicLayout.vue'
+import { useUserStore } from '@/stores/user'
 
 const routes = [
   {
@@ -17,6 +19,12 @@ const routes = [
     path: '/register',
     name: 'Register',
     component: () => import('@/views/Register.vue')
+  },
+  {
+    path: '/share/:shareCode',
+    name: 'PublicShare',
+    component: () => import('@/views/Share.vue'),
+    meta: { requiresAuth: false }
   },
   {
     path: '/app',
@@ -72,6 +80,17 @@ router.beforeEach((to, from, next) => {
   if (to.matched.some(record => record.meta.requiresAuth) && !token) {
     next('/login')
     return
+  }
+
+  if (to.path === '/app/admin') {
+    const userStore = useUserStore()
+    const userInfo = userStore.userInfo || {}
+    const hasAdminFlag = Object.prototype.hasOwnProperty.call(userInfo, 'isAdmin')
+    if (hasAdminFlag && Number(userInfo.isAdmin || 0) !== 1) {
+      ElMessage.error('当前账号没有后台管理权限')
+      next('/app/disk')
+      return
+    }
   }
   next()
 })

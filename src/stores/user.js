@@ -3,6 +3,7 @@ import { ref } from 'vue'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('token') || '')
+  const PREFERENCES_KEY = 'lightdisk_preferences'
   
   let savedInfo = {}
   try {
@@ -26,6 +27,16 @@ export const useUserStore = defineStore('user', () => {
     userInfo.value = {}
     localStorage.removeItem('token')
     localStorage.removeItem('userInfo')
+    try {
+      const rawPreferences = localStorage.getItem(PREFERENCES_KEY)
+      const nextPreferences = rawPreferences ? JSON.parse(rawPreferences) : {}
+      nextPreferences.theme = 'light'
+      localStorage.setItem(PREFERENCES_KEY, JSON.stringify(nextPreferences))
+    } catch (e) {}
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.remove('dark')
+      document.documentElement.setAttribute('data-theme', 'light')
+    }
   }
 
   return { token, userInfo, setToken, setUserInfo, logout }
