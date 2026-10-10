@@ -12,7 +12,7 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     // 允许通过 CloudStudio 预览代理域名访问（陌生人分享链接也需要）
-    allowedHosts: ['.cloudstudio.net', '.cloudstudio.work'],
+    allowedHosts: ['.cloudstudio.net', '.cloudstudio.work', '.cloudstudio.club'],
     proxy: {
       '/api': {
         target: 'http://localhost:8080',
