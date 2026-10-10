@@ -44,10 +44,7 @@
           </el-form-item>
 
           <div class="form-options">
-            <div class="options-left">
-              <el-checkbox v-model="rememberMe">记住我</el-checkbox>
-              <el-checkbox v-model="isAdminLogin" class="admin-checkbox">我是管理员</el-checkbox>
-            </div>
+            <el-checkbox v-model="rememberMe">记住我</el-checkbox>
             <span class="forgot-pass" @click="forgotDialogVisible = true">忘记密码？</span>
           </div>
 
@@ -146,7 +143,6 @@ let sliderTimer = null
 const loading = ref(false)
 const formRef = ref(null)
 const rememberMe = ref(false)
-const isAdminLogin = ref(false)
 const forgotDialogVisible = ref(false)
 const resettingPassword = ref(false)
 const forgotCountdown = ref(0)
@@ -188,8 +184,7 @@ const startForgotCountdown = () => {
 
     const res = await request.post('/login', {
       username: form.username,
-      password: form.password,
-      adminLogin: isAdminLogin.value
+      password: form.password
     })
 
     const {
@@ -536,17 +531,6 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
-}
-
-.options-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.admin-checkbox :deep(.el-checkbox__label) {
-  color: #007AFF;
-  font-weight: 500;
 }
 
 :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
