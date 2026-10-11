@@ -69,14 +69,14 @@
 
           <!-- 通知铃铛 -->
           <el-popover
-            :visible="showNotificationPanel"
+            v-model:visible="showNotificationPanel"
             placement="bottom-end"
             :width="380"
             trigger="click"
             popper-class="notification-popper"
           >
             <template #reference>
-              <div class="bell-trigger" @click="showNotificationPanel = !showNotificationPanel">
+              <div class="bell-trigger">
                 <el-badge :value="unreadCount" :hidden="unreadCount <= 0" :max="99">
                   <el-icon :size="20"><Bell /></el-icon>
                 </el-badge>
@@ -125,7 +125,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Bell, ChatDotRound, Delete, Document, Setting, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
@@ -247,6 +247,11 @@ const fetchNotices = async () => {
 const handleUnreadUpdated = (count) => {
   unreadCount.value = count
 }
+
+// 面板打开时刷新一次数据
+watch(showNotificationPanel, (visible) => {
+  if (visible) notificationRefreshKey.value++
+})
 </script>
 
 <style scoped>
