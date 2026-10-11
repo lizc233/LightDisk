@@ -148,6 +148,9 @@
       </div>
     </div>
 
+    <!-- 在线文本编辑器 -->
+    <TextEditorDialog v-model="editorVisible" :file-id="editorFileId" @saved="loadFileList" />
+
     <el-dialog
       v-model="shareDialogVisible"
       title="分享文件"
@@ -250,6 +253,7 @@ import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import TextEditorDialog from '@/components/TextEditorDialog.vue'
 import {
   ArrowRight,
   Clock,
@@ -458,6 +462,13 @@ const handleRowClick = async (row) => {
     return
   }
 
+  // 文本类文件 → 在线编辑器（txt/md/json/csv 等，后端白名单 + 2MB 限制）
+  if (isTextEditable(row)) {
+    editorFileId.value = row.id
+    editorVisible.value = true
+    return
+  }
+
   const action = resolveOpenAction(row)
   if (action === 'download') {
     handleDownload(row)
@@ -567,8 +578,18 @@ const resolveFileCategory = (row) => {
   return 'other'
 }
 
-const resolveOpenAction = (row) => {
-  const category = resolveFileCategory(row)
+// ===== 在线文本编辑器 =====
+const editorVisible = ref(false)
+const editorFileId = ref(null)
+const TEXT_EDITABLE_EXTS = ['txt', 'md', 'json', 'csv', 'log', 'xml', 'yml', 'yaml', 'ini', 'conf', 'properties', 'html', 'css', 'js', 'sql', 'bat', 'sh']
+
+const isTextEditable = (row) => {
+  if (row.isFolder || !row.name) return false
+  const ext = row.name.split('.').pop().toLowerCase()
+  return TEXT_EDITABLE_EXTS.includes(ext)
+}
+
+const resolveOpenAction = (row) => {  const category = resolveFileCategory(row)
   const info = userStore.userInfo || {}
   if (category === 'image') return info.imageOpenAction || 'preview'
   if (category === 'video') return info.videoOpenAction || 'preview'
