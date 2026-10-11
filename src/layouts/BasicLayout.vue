@@ -57,6 +57,21 @@
         </div>
 
         <div class="header-right">
+          <!-- 分享码搜索：输入分享码跳转提取页 -->
+          <div class="share-search">
+            <el-input
+              v-model="shareCodeInput"
+              size="small"
+              placeholder="输入分享码提取文件"
+              clearable
+              @keydown.enter="goToShare"
+            >
+              <template #suffix>
+                <el-icon class="share-search-btn" @click="goToShare"><Search /></el-icon>
+              </template>
+            </el-input>
+          </div>
+
           <div class="storage-info">
             <span class="storage-label">存储空间</span>
             <el-progress
@@ -137,7 +152,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, ChatDotRound, Delete, Document, Message, Setting, Share } from '@element-plus/icons-vue'
+import { Bell, ChatDotRound, Delete, Document, Message, Search, Setting, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
@@ -275,6 +290,19 @@ const fetchNotices = async () => {
   ]
 }
 
+// ===== 分享码搜索 =====
+const shareCodeInput = ref('')
+
+const goToShare = () => {
+  const code = shareCodeInput.value.trim()
+  if (!code) {
+    ElMessage.warning('请输入分享码')
+    return
+  }
+  router.push(`/share/${encodeURIComponent(code)}`)
+  shareCodeInput.value = ''
+}
+
 // 未读数更新回调
 const handleUnreadUpdated = (count) => {
   unreadCount.value = count
@@ -398,6 +426,20 @@ watch(showNotificationPanel, (visible) => {
   display: flex;
   align-items: center;
   gap: 20px;
+}
+
+.share-search {
+  width: 190px;
+}
+
+.share-search-btn {
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color 0.2s;
+}
+
+.share-search-btn:hover {
+  color: var(--accent);
 }
 
 .storage-info {

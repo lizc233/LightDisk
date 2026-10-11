@@ -213,8 +213,15 @@
               <el-icon class="attach-icon"><Document /></el-icon>
               <span class="attach-name">{{ att.name }}</span>
               <span class="attach-size">{{ formatSize(att.size) }}</span>
+              <el-button
+                v-if="detailMsg.itemType !== 'announcement'"
+                link
+                type="primary"
+                size="small"
+                @click="handleSaveAttachment(att)"
+              >转存</el-button>
             </div>
-            <p class="attach-tip">附件转存到网盘的能力正在开发中，当前仅展示附件信息</p>
+            <p class="attach-tip">点击「转存」把附件保存到你的网盘根目录（同一份物理存储，秒转不占双倍空间）</p>
           </div>
         </article>
       </section>
@@ -276,7 +283,7 @@ import {
   unblockUser,
   updateContactRemark
 } from '@/api/contact'
-import { deleteMessage, getNotificationList, getMessageList, markAnnouncementRead, markMessageRead } from '@/api/notification'
+import { deleteMessage, getNotificationList, getMessageList, markAnnouncementRead, markMessageRead, saveMessageAttachment } from '@/api/notification'
 import { formatRelativeTime } from '@/utils/datetime'
 import WriteMessageDialog from '@/components/WriteMessageDialog.vue'
 
@@ -375,6 +382,17 @@ function openDetail(msg) {
 function closeDetail() {
   detailMsg.value = null
   detailAttachments.value = []
+}
+
+/** 附件一键转存到我的网盘 */
+async function handleSaveAttachment(att) {
+  if (!detailMsg.value || !detailMsg.value.messageId) return
+  try {
+    await saveMessageAttachment(detailMsg.value.messageId, att.fileId)
+    ElMessage.success(`「${att.name}」已转存到你的网盘根目录`)
+  } catch (e) {
+    /* 拦截器已提示（如同名冲突/文件失效） */
+  }
 }
 
 /** 解析消息的附件 JSON（容错） */

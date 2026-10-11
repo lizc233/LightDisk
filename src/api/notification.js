@@ -89,3 +89,8 @@ export function sendPersonalMessage(data) {
 export function deleteMessage(messageId) {
   return request.delete(`/messages/${messageId}`)
 }
+
+/** 把消息附件转存到我的网盘（复用分享转存的引用计数逻辑） */
+export function saveMessageAttachment(messageId, fileId) {
+  return request.post(`/messages/${messageId}/attachments/${fileId}/save`)
+}
