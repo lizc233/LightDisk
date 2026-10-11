@@ -85,8 +85,8 @@ const filteredList = computed(() => {
 async function fetchUnreadCount() {
   try {
     const res = await getUnreadCount()
-    if (res.data && res.data.code === 1) {
-      const d = res.data.data
+    if (res && res.code === 1) {
+      const d = res.data
       unreadTotal.value = d.totalUnread || 0
       emit('unread-updated', unreadTotal.value)
     }
@@ -97,9 +97,9 @@ async function fetchList(append = false) {
   loading.value = true
   try {
     const res = await getNotificationList({ pageNum: pageNum.value, pageSize })
-    if (res.data && res.data.code === 1) {
-      const d = res.data.data
-      total = d.total || 0
+    if (res && res.code === 1) {
+      const d = res.data
+      total.value = d.total || 0
       if (append) {
         list.value.push(...(d.list || []))
       } else {

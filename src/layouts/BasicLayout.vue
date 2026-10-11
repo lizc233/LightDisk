@@ -230,8 +230,8 @@ const notificationRefreshKey = ref(0)
 const fetchNotices = async () => {
   try {
     const res = await getSidebarAnnouncements()
-    if (res.data && (res.data.code === 1 || res.data.code === 200)) {
-      notices.value = (res.data.data || []).map(item => item.title)
+    if (res && (res.code === 1 || res.code === 200)) {
+      notices.value = (res.data || []).map(item => item.title)
     }
   } catch (e) {
     // 接口不可用时使用默认公告

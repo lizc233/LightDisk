@@ -32,6 +32,8 @@ request.interceptors.response.use(
         return res
     },
     (error) => {
+        // 静默请求（如轮询）：不弹全局错误提示，但仍会处理 401
+        const silent = error.config?.silent === true
         if (error.config?.skipAuthRedirect) {
             return Promise.reject(error)
         }
@@ -40,7 +42,7 @@ request.interceptors.response.use(
             userStore.logout()
             router.push('/login')
             ElMessage.error('登录已过期，请重新登录')
-        } else {
+        } else if (!silent) {
             ElMessage.error(error.message || '网络错误')
         }
         return Promise.reject(error)

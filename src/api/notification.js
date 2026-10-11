@@ -29,16 +29,16 @@ export function toggleAnnouncementTop(id) {
 
 // ==================== 用户端：侧边栏公告 ====================
 
-/** 获取侧边栏轮播公告 */
+/** 获取侧边栏轮播公告（后台接口，失败静默） */
 export function getSidebarAnnouncements() {
-  return request.get('/announcements/sidebar')
+  return request.get('/announcements/sidebar', { silent: true })
 }
 
 // ==================== 用户端：通知中心（铃铛） ====================
 
-/** 获取未读统计 */
+/** 获取未读统计（30s 轮询，失败静默） */
 export function getUnreadCount() {
-  return request.get('/notifications/unread-count')
+  return request.get('/notifications/unread-count', { silent: true })
 }
 
 /** 获取合并通知列表 */
