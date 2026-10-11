@@ -142,7 +142,7 @@ import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
-import { getSidebarAnnouncements } from '@/api/notification'
+import { getRecentAnnouncements, getSidebarAnnouncements } from '@/api/notification'
 import NotificationPanel from '@/components/NotificationPanel.vue'
 import WriteMessageDialog from '@/components/WriteMessageDialog.vue'
 
@@ -250,21 +250,29 @@ const handleMessageSent = () => {
   notificationRefreshKey.value++
 }
 
-// 获取侧边栏公告
+// 获取侧边栏轮播公告：优先「最近公告+系统通知」混合（最近3条），失败退回侧边栏接口，再退回默认文案
 const fetchNotices = async () => {
   try {
-    const res = await getSidebarAnnouncements()
-    if (res && (res.code === 1 || res.code === 200)) {
-      notices.value = (res.data || []).map(item => item.title)
+    const res = await getRecentAnnouncements(3)
+    if (res && (res.code === 1 || res.code === 200) && (res.data || []).length) {
+      notices.value = res.data.map(item => item.title)
+      return
     }
-  } catch (e) {
-    // 接口不可用时使用默认公告
-    notices.value = [
-      '欢迎使用 LightDisk 云盘',
-      '回收站现已支持 30 天有效期',
-      '设置中心已接入主题与上传偏好'
-    ]
-  }
+  } catch (e) { /* 继续尝试兜底 */ }
+
+  try {
+    const res = await getSidebarAnnouncements()
+    if (res && (res.code === 1 || res.code === 200) && (res.data || []).length) {
+      notices.value = (res.data || []).map(item => item.title)
+      return
+    }
+  } catch (e) { /* 使用默认 */ }
+
+  notices.value = [
+    '欢迎使用 LightDisk 云盘',
+    '回收站现已支持 30 天有效期',
+    '设置中心已接入主题与上传偏好'
+  ]
 }
 
 // 未读数更新回调

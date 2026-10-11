@@ -179,15 +179,23 @@ function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
 }
 
+// ===== 跨页面同步：私信中心等页面标记已读后广播此事件，铃铛立即刷新 =====
+function handleExternalUnreadChange() {
+  fetchUnreadCount()
+  fetchList()
+}
+
 // ===== 生命周期 =====
 onMounted(() => {
   fetchUnreadCount()
   fetchList()
   startPolling()
+  window.addEventListener('ld:refresh-unread', handleExternalUnreadChange)
 })
 
 onUnmounted(() => {
   stopPolling()
+  window.removeEventListener('ld:refresh-unread', handleExternalUnreadChange)
 })
 
 // 监听外部刷新信号

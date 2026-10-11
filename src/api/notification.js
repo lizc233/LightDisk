@@ -34,6 +34,11 @@ export function getSidebarAnnouncements() {
   return request.get('/announcements/sidebar', { silent: true })
 }
 
+/** 获取最近公告+系统通知（混合，置顶优先，默认3条，失败静默） */
+export function getRecentAnnouncements(limit = 3) {
+  return request.get('/announcements/recent', { params: { limit }, silent: true })
+}
+
 // ==================== 用户端：通知中心（铃铛） ====================
 
 /** 获取未读统计（30s 轮询，失败静默） */
@@ -73,7 +78,8 @@ export function getMessageList(params) {
 
 /**
  * 发送私信（管理员与普通用户通用）
- * @param {{receiverIds:string,title:string,content:string,autoAddContact?:boolean}} data
+ * @param {{receiverIds:string,title:string,content:string,autoAddContact?:boolean,attachments?:string}} data
+ * attachments: JSON 数组字符串 [{fileId,name,size,type}]
  */
 export function sendPersonalMessage(data) {
   return request.post('/messages/send', data)

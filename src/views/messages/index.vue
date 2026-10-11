@@ -9,7 +9,7 @@
       <el-button type="primary" :icon="Promotion" @click="openWrite()">写私信</el-button>
     </header>
 
-    <el-tabs v-model="activeTab" class="main-tabs">
+    <el-tabs v-model="activeTab" class="main-tabs" v-show="!detailMsg">
       <!-- ==================== 收件箱 ==================== -->
       <el-tab-pane name="inbox">
         <template #label>
@@ -34,6 +34,7 @@
             v-for="msg in messages"
             :key="msg.id"
             :class="['msg-item', { unread: msg.isRead === 0 }]"
+            @click="openDetail(msg)"
           >
             <div class="msg-avatar">
               <el-icon :size="18"><ChatDotRound /></el-icon>
@@ -51,10 +52,13 @@
                 <el-tag v-else-if="msg.senderIsContact" size="small" type="success" effect="plain">联系人</el-tag>
                 <span class="msg-time">{{ formatRelativeTime(msg.createdAt) }}</span>
               </div>
-              <h4 class="msg-title">{{ msg.title }}</h4>
-              <p class="msg-content">{{ msg.content }}</p>
+              <h4 class="msg-title">
+                {{ msg.title }}
+                <el-icon v-if="parseAttachments(msg.attachments).length" class="attach-flag" :size="13"><Paperclip /></el-icon>
+              </h4>
+              <p class="msg-content">{{ plainText(msg.content) }}</p>
 
-              <div class="msg-actions">
+              <div class="msg-actions" @click.stop>
                 <el-button v-if="msg.isRead === 0" link type="primary" size="small" @click="handleMarkRead(msg)">
                   标记已读
                 </el-button>
@@ -147,6 +151,75 @@
       </el-tab-pane>
     </el-tabs>
 
+    <!-- ==================== 消息详情（页面内覆盖，浏览器式前进/后退） ==================== -->
+    <transition name="detail-slide">
+      <section v-if="detailMsg" class="detail-view">
+        <div class="detail-toolbar">
+          <el-button link type="primary" :icon="ArrowLeft" @click="closeDetail">返回收件箱</el-button>
+          <div class="detail-toolbar-right">
+            <el-button
+              v-if="detailMsg.itemType !== 'announcement' && detailMsg.senderId"
+              link
+              type="primary"
+              size="small"
+              @click="openWrite({ id: detailMsg.senderId, username: detailMsg.senderName })"
+            >回信</el-button>
+            <el-button
+              v-if="detailMsg.isRead === 0"
+              link
+              type="primary"
+              size="small"
+              @click="handleMarkRead(detailMsg)"
+            >标记已读</el-button>
+            <el-button
+              v-if="detailMsg.itemType !== 'announcement'"
+              link
+              type="danger"
+              size="small"
+              @click="handleDeleteMessage(detailMsg)"
+            >删除</el-button>
+          </div>
+        </div>
+
+        <article :class="['detail-card', { unread: detailMsg.isRead === 0 }]">
+          <div class="detail-head">
+            <el-tag v-if="detailMsg.itemType === 'announcement'" size="small" type="info" effect="plain">系统通知</el-tag>
+            <el-tag v-else-if="detailMsg.messageType === 2" size="small" type="warning" effect="plain">管理员</el-tag>
+            <el-tag v-else-if="detailMsg.senderIsContact" size="small" type="success" effect="plain">联系人</el-tag>
+            <el-tag v-else size="small" type="danger" effect="plain">陌生</el-tag>
+          </div>
+
+          <h2 class="detail-title">{{ detailMsg.title }}</h2>
+          <div class="detail-meta">
+            <span>发件人：<strong>{{ detailMsg.senderName }}</strong><span v-if="detailMsg.senderId" class="meta-id">（#{{ detailMsg.senderId }}）</span></span>
+            <span>{{ formatFullTime(detailMsg.createdAt) }}</span>
+          </div>
+
+          <el-divider />
+
+          <div class="detail-content">
+            <!-- 公告内容是管理员编写的富文本，允许渲染 -->
+            <div v-if="detailMsg.itemType === 'announcement'" v-html="detailMsg.content"></div>
+            <template v-else>{{ detailMsg.content }}</template>
+          </div>
+
+          <!-- 附件（预留：附件转存/下载功能后续接入） -->
+          <div v-if="detailAttachments.length" class="detail-attachments">
+            <p class="attach-title">
+              <el-icon><Paperclip /></el-icon>
+              附件（{{ detailAttachments.length }}）
+            </p>
+            <div v-for="att in detailAttachments" :key="att.fileId" class="attach-item">
+              <el-icon class="attach-icon"><Document /></el-icon>
+              <span class="attach-name">{{ att.name }}</span>
+              <span class="attach-size">{{ formatSize(att.size) }}</span>
+            </div>
+            <p class="attach-tip">附件转存到网盘的能力正在开发中，当前仅展示附件信息</p>
+          </div>
+        </article>
+      </section>
+    </transition>
+
     <!-- 写私信 -->
     <WriteMessageDialog v-model="writeVisible" :preset="writePreset" @sent="onMessageSent" />
 
@@ -183,9 +256,12 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  ArrowLeft,
   ChatDotRound,
   CirclePlus,
+  Document,
   Message,
+  Paperclip,
   Promotion,
   Star,
   Warning
@@ -277,6 +353,72 @@ function handlePageChange(page) {
   loadMessages()
 }
 
+// ===== 未读数跨组件同步 =====
+// 私信中心标记已读/删除后广播事件，铃铛面板（NotificationPanel）监听后立即刷新
+function notifyUnreadChanged() {
+  window.dispatchEvent(new Event('ld:refresh-unread'))
+}
+
+// ===== 消息详情（页面内覆盖） =====
+const detailMsg = ref(null)
+const detailAttachments = ref([])
+
+function openDetail(msg) {
+  detailMsg.value = msg
+  detailAttachments.value = parseAttachments(msg.attachments)
+  // 打开详情即视为阅读，未读则自动标记已读
+  if (msg.isRead === 0) {
+    handleMarkRead(msg)
+  }
+}
+
+function closeDetail() {
+  detailMsg.value = null
+  detailAttachments.value = []
+}
+
+/** 解析消息的附件 JSON（容错） */
+function parseAttachments(raw) {
+  if (!raw) return []
+  try {
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.filter((a) => a && a.name) : []
+  } catch {
+    return []
+  }
+}
+
+/** 去掉 HTML 标签取纯文本（列表摘要用） */
+function plainText(content) {
+  if (!content) return ''
+  return content.replace(/<[^>]+>/g, '').trim()
+}
+
+function formatSize(bytes) {
+  const n = Number(bytes || 0)
+  if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + ' GB'
+  if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(2) + ' MB'
+  if (n >= 1024) return (n / 1024).toFixed(1) + ' KB'
+  return n + ' B'
+}
+
+/** 详情页显示完整时间（yyyy-MM-dd HH:mm），兼容后端数组格式 */
+function formatFullTime(value) {
+  const d = toDate(value)
+  if (!d) return ''
+  const pad = (x) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function toDate(value) {
+  if (!value) return null
+  if (Array.isArray(value) && value.length >= 6) {
+    return new Date(value[0], value[1] - 1, value[2], value[3], value[4], value[5] || 0)
+  }
+  const d = new Date(value)
+  return isNaN(d.getTime()) ? null : d
+}
+
 async function handleMarkRead(msg) {
   try {
     if (msg.itemType === 'announcement') {
@@ -284,7 +426,10 @@ async function handleMarkRead(msg) {
     } else {
       await markMessageRead(msg.messageId)
     }
-    msg.isRead = 1
+    if (msg.isRead === 0) {
+      msg.isRead = 1
+      notifyUnreadChanged()
+    }
   } catch (e) { /* 静默 */ }
 }
 
@@ -297,6 +442,10 @@ async function handleDeleteMessage(msg) {
   }
   await deleteMessage(msg.messageId)
   ElMessage.success('已删除')
+  if (detailMsg.value && detailMsg.value.id === msg.id) {
+    closeDetail()
+  }
+  notifyUnreadChanged()
   loadMessages()
 }
 
@@ -607,6 +756,144 @@ onMounted(() => {
   margin-top: 8px;
   display: flex;
   gap: 12px;
+}
+
+.attach-flag {
+  vertical-align: -2px;
+  margin-left: 4px;
+  color: var(--text-muted);
+}
+
+/* ===== 详情覆盖页 ===== */
+.detail-view {
+  margin-top: 8px;
+}
+
+.detail-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.detail-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.detail-card {
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--surface-solid);
+  padding: 22px 26px;
+}
+
+.detail-card.unread {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.detail-head {
+  display: flex;
+  gap: 8px;
+}
+
+.detail-title {
+  margin-top: 10px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.detail-meta {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.meta-id {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.detail-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.detail-attachments {
+  margin-top: 18px;
+  border-top: 1px dashed var(--border-color);
+  padding-top: 14px;
+}
+
+.attach-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.attach-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  margin-bottom: 8px;
+  max-width: 480px;
+}
+
+.attach-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.attach-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-size {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.attach-tip {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.detail-slide-enter-active,
+.detail-slide-leave-active {
+  transition: all 0.24s ease;
+}
+
+.detail-slide-enter-from,
+.detail-slide-leave-to {
+  opacity: 0;
+  transform: translateX(24px);
 }
 
 .pager {
