@@ -23,7 +23,7 @@
             <el-radio-button label="stranger">陌生消息</el-radio-button>
           </el-radio-group>
           <span class="group-tip">
-            「陌生消息」= 发送者不在你的联系人列表中，可与联系人消息分开查看
+            「全部」= 系统通知 + 所有私信；「联系人 / 陌生」仅筛选私信
           </span>
         </div>
 
@@ -42,13 +42,13 @@
             <div class="msg-body">
               <div class="msg-top">
                 <strong class="msg-from">{{ msg.senderName }}</strong>
-                <span class="from-id">#{{ msg.senderId || '-' }}</span>
-                <el-tag v-if="msg.messageType === 2" size="small" type="warning" effect="plain">管理员</el-tag>
+                <span class="from-id" v-if="msg.senderId">#{{ msg.senderId }}</span>
+                <el-tag v-if="msg.itemType === 'announcement'" size="small" type="info" effect="plain">系统通知</el-tag>
+                <el-tag v-else-if="msg.messageType === 2" size="small" type="warning" effect="plain">管理员</el-tag>
                 <el-tag v-else-if="msg.messageType === 4 && !msg.senderIsContact" size="small" type="danger" effect="plain">
                   陌生
                 </el-tag>
                 <el-tag v-else-if="msg.senderIsContact" size="small" type="success" effect="plain">联系人</el-tag>
-                <el-tag v-else-if="msg.messageType === 1" size="small" type="info" effect="plain">系统</el-tag>
                 <span class="msg-time">{{ formatRelativeTime(msg.createdAt) }}</span>
               </div>
               <h4 class="msg-title">{{ msg.title }}</h4>
@@ -59,7 +59,7 @@
                   标记已读
                 </el-button>
                 <el-button
-                  v-if="msg.senderId"
+                  v-if="msg.itemType !== 'announcement' && msg.senderId"
                   link
                   type="primary"
                   size="small"
@@ -67,7 +67,7 @@
                 >
                   回信
                 </el-button>
-                <el-button link type="danger" size="small" @click="handleDeleteMessage(msg)">删除</el-button>
+                <el-button v-if="msg.itemType !== 'announcement'" link type="danger" size="small" @click="handleDeleteMessage(msg)">删除</el-button>
               </div>
             </div>
           </article>
@@ -200,7 +200,7 @@ import {
   unblockUser,
   updateContactRemark
 } from '@/api/contact'
-import { deleteMessage, getMessageList, markMessageRead } from '@/api/notification'
+import { deleteMessage, getNotificationList, getMessageList, markAnnouncementRead, markMessageRead } from '@/api/notification'
 import { formatRelativeTime } from '@/utils/datetime'
 import WriteMessageDialog from '@/components/WriteMessageDialog.vue'
 
@@ -217,13 +217,53 @@ const total = ref(0)
 async function loadMessages() {
   messagesLoading.value = true
   try {
-    const res = await getMessageList({ pageNum: pageNum.value, pageSize: pageSize.value, group: group.value })
-    if (res && res.code === 1) {
-      messages.value = res.data?.list || []
-      total.value = Number(res.data?.total || 0)
+    if (group.value === 'all') {
+      // 全部 = 系统通知(announcement 表) + 个人私信(personal_message 表)，走合并接口
+      const res = await getNotificationList({ pageNum: pageNum.value, pageSize: pageSize.value })
+      if (res && res.code === 1) {
+        messages.value = (res.data?.list || []).map(normalizeNotification)
+        total.value = Number(res.data?.total || 0)
+      }
+    } else {
+      // 联系人 / 陌生分组只筛私信
+      const res = await getMessageList({ pageNum: pageNum.value, pageSize: pageSize.value, group: group.value })
+      if (res && res.code === 1) {
+        messages.value = (res.data?.list || []).map((m) => ({ ...m, itemType: 'message', messageId: m.id }))
+        total.value = Number(res.data?.total || 0)
+      }
     }
   } finally {
     messagesLoading.value = false
+  }
+}
+
+/**
+ * 把合并接口的 NotificationItemVO 归一化为收件箱行结构：
+ * - announcement → 系统通知（发件人=系统，用 announcementId 标记已读）
+ * - message     → 私信（用 messageId 标记已读 / 删除）
+ */
+function normalizeNotification(item) {
+  if (item.itemType === 'announcement') {
+    return {
+      id: `a_${item.announcementId}`,
+      itemType: 'announcement',
+      announcementId: item.announcementId,
+      title: item.title,
+      content: item.content,
+      senderName: '系统',
+      senderId: null,
+      messageType: 1,
+      isRead: item.isRead ? 1 : 0,
+      createdAt: item.createdAt
+    }
+  }
+  return {
+    ...item,
+    id: `m_${item.messageId}`,
+    itemType: 'message',
+    messageId: item.messageId || item.id,
+    senderName: item.senderName || '未知用户',
+    isRead: item.isRead ? 1 : 0
   }
 }
 
@@ -239,18 +279,23 @@ function handlePageChange(page) {
 
 async function handleMarkRead(msg) {
   try {
-    await markMessageRead(msg.id)
+    if (msg.itemType === 'announcement') {
+      await markAnnouncementRead(msg.announcementId)
+    } else {
+      await markMessageRead(msg.messageId)
+    }
     msg.isRead = 1
   } catch (e) { /* 静默 */ }
 }
 
 async function handleDeleteMessage(msg) {
+  if (msg.itemType === 'announcement') return // 系统通知不允许在收件箱删除
   try {
     await ElMessageBox.confirm(`确认删除「${msg.title}」吗？`, '删除确认', { type: 'warning' })
   } catch {
     return
   }
-  await deleteMessage(msg.id)
+  await deleteMessage(msg.messageId)
   ElMessage.success('已删除')
   loadMessages()
 }
