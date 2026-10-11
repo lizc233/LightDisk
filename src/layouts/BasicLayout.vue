@@ -67,6 +67,28 @@
             {{ preferencesStore.isDark ? '暗黑主题' : '明亮主题' }}
           </el-tag>
 
+          <!-- 通知铃铛 -->
+          <el-popover
+            :visible="showNotificationPanel"
+            placement="bottom-end"
+            :width="380"
+            trigger="click"
+            popper-class="notification-popper"
+          >
+            <template #reference>
+              <div class="bell-trigger" @click="showNotificationPanel = !showNotificationPanel">
+                <el-badge :value="unreadCount" :hidden="unreadCount <= 0" :max="99">
+                  <el-icon :size="20"><Bell /></el-icon>
+                </el-badge>
+              </div>
+            </template>
+            <NotificationPanel
+              :refresh-version="notificationRefreshKey"
+              @unread-updated="handleUnreadUpdated"
+              @close-panel="showNotificationPanel = false"
+            />
+          </el-popover>
+
           <el-dropdown trigger="click" @command="handleCommand">
             <div class="user-profile">
               <el-avatar
@@ -105,11 +127,13 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChatDotRound, Delete, Document, Setting, Share } from '@element-plus/icons-vue'
+import { Bell, ChatDotRound, Delete, Document, Setting, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
+import { getSidebarAnnouncements } from '@/api/notification'
+import NotificationPanel from '@/components/NotificationPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -191,14 +215,38 @@ const handleCommand = (command) => {
 
 onMounted(() => {
   fetchUserData()
+  fetchNotices()
 })
 
 const activeMenu = computed(() => route.path)
-const notices = [
-  '回收站现已支持 30 天有效期与容量限制',
-  '设置中心已接入主题与上传偏好',
-  '个人中心支持真实 VIP 信息与邮箱绑定'
-]
+
+// ===== 通知系统 =====
+const notices = ref([])
+const unreadCount = ref(0)
+const showNotificationPanel = ref(false)
+const notificationRefreshKey = ref(0)
+
+// 获取侧边栏公告
+const fetchNotices = async () => {
+  try {
+    const res = await getSidebarAnnouncements()
+    if (res.data && (res.data.code === 1 || res.data.code === 200)) {
+      notices.value = (res.data.data || []).map(item => item.title)
+    }
+  } catch (e) {
+    // 接口不可用时使用默认公告
+    notices.value = [
+      '欢迎使用 LightDisk 云盘',
+      '回收站现已支持 30 天有效期',
+      '设置中心已接入主题与上传偏好'
+    ]
+  }
+}
+
+// 未读数更新回调
+const handleUnreadUpdated = (count) => {
+  unreadCount.value = count
+}
 </script>
 
 <style scoped>
@@ -364,6 +412,22 @@ const notices = [
 
 .user-meta small {
   color: var(--text-secondary);
+}
+
+.bell-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+.bell-trigger:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .page-main {
