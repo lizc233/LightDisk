@@ -70,16 +70,19 @@
 import { reactive, ref, onMounted } from 'vue'
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { CircleCloseFilled, Document } from '@element-plus/icons-vue'
 import request from '@/utils/request'
+import { extractShareCode, isValidShareCode } from '@/utils/share'
 import { useUserStore } from '@/stores/user'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const shareCode = ref(route.params.shareCode || '')
+// 兼容：路由参数里可能带的是整条链接（例如从外部复制粘贴 / 旧链接），统一解析成纯分享码
+const shareCode = ref(extractShareCode(route.params.shareCode || ''))
 const loading = ref(true)
 const downloading = ref(false)
 const saving = ref(false)
@@ -113,8 +116,8 @@ const ensureExtractCode = () => {
 }
 
 const fetchShareInfo = async () => {
-  if (!shareCode.value) {
-    errorMsg.value = '无效的分享链接'
+  if (!isValidShareCode(shareCode.value)) {
+    errorMsg.value = '无效的分享链接，请确认分享码是否正确'
     loading.value = false
     return
   }
@@ -135,11 +138,57 @@ const handleDownload = async () => {
   }
   downloading.value = true
   try {
-    const url = `/api/share/public/${shareCode.value}/download?extractCode=${encodeURIComponent(extractCode.value.trim())}`
-    window.open(url, '_self')
+    // 用 blob 方式下载：这样提取码错误时能拿到 JSON 提示并弹 toast，
+    // 而不是整页跳到一坨原始 JSON
+    const token = userStore.token
+    const resp = await axios.get(
+      `/api/share/public/${encodeURIComponent(shareCode.value)}/download`,
+      {
+        params: { extractCode: extractCode.value.trim() },
+        responseType: 'blob',
+        headers: token
+          ? { Authorization: token.startsWith('Bearer ') ? token : `Bearer ${token}` }
+          : {}
+      }
+    )
+
+    const blob = resp.data
+    if (blob && blob.type && blob.type.indexOf('application/json') !== -1) {
+      ElMessage.error(await readBlobMessage(blob))
+      return
+    }
+
+    const objectUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = shareInfo.value?.fileName || 'download'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(objectUrl)
+  } catch (error) {
+    ElMessage.error(await resolveDownloadError(error))
   } finally {
     downloading.value = false
   }
+}
+
+// 读取后端以 JSON 形式返回的错误消息
+const readBlobMessage = async (blob) => {
+  try {
+    const text = await blob.text()
+    return JSON.parse(text).msg || '下载失败'
+  } catch (e) {
+    return '下载失败'
+  }
+}
+
+const resolveDownloadError = async (error) => {
+  const data = error.response?.data
+  if (data instanceof Blob) {
+    return readBlobMessage(data)
+  }
+  return data?.msg || error.message || '下载失败'
 }
 
 const saveToMyDisk = async () => {

@@ -155,6 +155,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Bell, ChatDotRound, Delete, Document, Message, Search, Setting, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
+import { extractShareCode, isValidShareCode } from '@/utils/share'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
 import { getRecentAnnouncements, getSidebarAnnouncements } from '@/api/notification'
@@ -294,9 +295,15 @@ const fetchNotices = async () => {
 const shareCodeInput = ref('')
 
 const goToShare = () => {
-  const code = shareCodeInput.value.trim()
-  if (!code) {
+  const raw = shareCodeInput.value.trim()
+  if (!raw) {
     ElMessage.warning('请输入分享码')
+    return
+  }
+  // 兼容：用户可能直接粘贴整条分享链接，这里统一解析出纯分享码
+  const code = extractShareCode(raw)
+  if (!isValidShareCode(code)) {
+    ElMessage.warning('分享码格式不正确，请检查后重试')
     return
   }
   router.push(`/share/${encodeURIComponent(code)}`)
