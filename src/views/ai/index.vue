@@ -9,9 +9,11 @@
         </p>
       </div>
       <div class="hero-actions">
-        <el-tag type="success" effect="plain">文件智能检索</el-tag>
-        <el-tag effect="plain">问答可追溯</el-tag>
-        <el-tag type="warning" effect="plain">多策略协同</el-tag>
+        <el-tag :type="aiStatus.online ? 'success' : 'info'" effect="plain">
+          {{ aiStatus.online ? `在线 · ${aiStatus.model}` : '离线规则引擎' }}
+        </el-tag>
+        <el-tag effect="plain">当前身份：{{ aiStatus.userLevelName || '普通用户' }}</el-tag>
+        <el-tag type="warning" effect="plain">提问 → 意图理解 → 工具 → 复核</el-tag>
       </div>
     </section>
 
@@ -100,6 +102,24 @@
               <div class="stage-detail">{{ stage.detail }}</div>
             </div>
           </div>
+
+          <div v-if="critic" class="critic-box" :class="critic.passed ? 'ok' : 'warn'">
+            <div class="critic-title">
+              复核 Agent：{{ critic.passed ? '通过' : '发现问题' }}
+              <span class="critic-mode">{{ critic.mode === 'llm' ? `模型复核（${critic.reviewer}）` : '规则复核' }}</span>
+            </div>
+            <ul v-if="critic.issues && critic.issues.length" class="critic-issues">
+              <li v-for="(issue, i) in critic.issues" :key="i">{{ issue }}</li>
+            </ul>
+            <div v-if="critic.repaired" class="critic-repaired">已触发修正重写，回答以工具结果为准</div>
+          </div>
+
+          <div class="ability-tip">
+            可问范围：文件位置 {{ aiStatus.abilities?.askFileLocation ? '✓' : '✗' }} ·
+            总结文件 {{ aiStatus.abilities?.summarizeFile ? '✓' : '✗' }} ·
+            AI 改文件 {{ aiStatus.abilities?.editFile ? '✓' : '✗' }}
+            <span v-if="!aiStatus.abilities?.summarizeFile">（升级初级及以上可总结文件）</span>
+          </div>
         </section>
 
         <section class="panel-card">
@@ -145,6 +165,8 @@ const traceSummary = ref('')
 const traceStages = ref([])
 const currentSources = ref([])
 const capabilityCards = ref([])
+const critic = ref(null)
+const aiStatus = ref({ online: false, model: null, userLevel: 0, userLevelName: '普通用户', abilities: {} })
 const quickPrompts = ref([
   '帮我找实训报告在哪里',
   '回收站里有哪些快过期文件',
@@ -235,6 +257,7 @@ const sendMessage = async () => {
     traceStages.value = data.stages || []
     currentSources.value = data.sources || []
     capabilityCards.value = data.capabilityCards || []
+    critic.value = data.critic || null
     if (Array.isArray(data.followUpQuestions) && data.followUpQuestions.length) {
       quickPrompts.value = data.followUpQuestions
     }
@@ -250,7 +273,19 @@ const sendMessage = async () => {
 
 onMounted(() => {
   resetConversation()
+  loadAiStatus()
 })
+
+const loadAiStatus = async () => {
+  try {
+    const res = await request.get('/ai/status')
+    if (res && res.data) {
+      aiStatus.value = res.data
+    }
+  } catch (e) {
+    /* 状态不可用时保持离线提示 */
+  }
+}
 
 onBeforeUnmount(() => {
   stopThinkingAnimation()
@@ -258,6 +293,45 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.critic-box {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.critic-box.ok {
+  background: #f0f9eb;
+  border: 1px solid #e1f3d8;
+  color: #529b2e;
+}
+.critic-box.warn {
+  background: #fdf6ec;
+  border: 1px solid #faecd8;
+  color: #b88230;
+}
+.critic-title {
+  font-weight: 700;
+}
+.critic-mode {
+  margin-left: 6px;
+  font-weight: 400;
+  opacity: 0.8;
+}
+.critic-issues {
+  margin: 6px 0 0;
+  padding-left: 16px;
+}
+.critic-repaired {
+  margin-top: 4px;
+  font-weight: 600;
+}
+.ability-tip {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
+}
 .ai-page {
   display: flex;
   flex-direction: column;
