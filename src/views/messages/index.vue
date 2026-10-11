@@ -6,6 +6,7 @@
         <h1>私信中心</h1>
         <p class="sub">站内私信按「邮件」语义：知道对方 ID 或用户名即可发送，无需对方同意。</p>
       </div>
+      <el-button v-if="isAdminUser" type="warning" :icon="Bell" @click="noticeVisible = true">发通知</el-button>
       <el-button type="primary" :icon="Promotion" @click="openWrite()">写私信</el-button>
     </header>
 
@@ -230,6 +231,9 @@
     <!-- 写私信 -->
     <WriteMessageDialog v-model="writeVisible" :preset="writePreset" @sent="onMessageSent" />
 
+    <!-- 管理员发通知 -->
+    <SendNoticeDialog v-model="noticeVisible" @sent="reloadMessages" />
+
     <!-- 添加联系人 -->
     <el-dialog v-model="addVisible" title="添加联系人" width="460px" append-to-body>
       <el-form label-width="70px">
@@ -260,10 +264,11 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft,
+  Bell,
   ChatDotRound,
   CirclePlus,
   Document,
@@ -286,8 +291,14 @@ import {
 import { deleteMessage, getNotificationList, getMessageList, markAnnouncementRead, markMessageRead, saveMessageAttachment } from '@/api/notification'
 import { formatRelativeTime } from '@/utils/datetime'
 import WriteMessageDialog from '@/components/WriteMessageDialog.vue'
+import SendNoticeDialog from '@/components/SendNoticeDialog.vue'
+import { useUserStore } from '@/stores/user'
+
+const userStore = useUserStore()
+const isAdminUser = computed(() => Number(userStore.userInfo?.isAdmin || 0) >= 1)
 
 const activeTab = ref('inbox')
+const noticeVisible = ref(false)
 
 // ===== 收件箱 =====
 const group = ref('all')

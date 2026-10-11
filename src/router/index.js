@@ -91,7 +91,7 @@ router.beforeEach((to, from, next) => {
     const userStore = useUserStore()
     const userInfo = userStore.userInfo || {}
     const hasAdminFlag = Object.prototype.hasOwnProperty.call(userInfo, 'isAdmin')
-    if (hasAdminFlag && Number(userInfo.isAdmin || 0) !== 1) {
+    if (hasAdminFlag && Number(userInfo.isAdmin || 0) < 1) {
       ElMessage.error('当前账号没有后台管理权限')
       next('/app/disk')
       return

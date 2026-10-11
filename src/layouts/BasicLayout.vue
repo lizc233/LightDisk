@@ -31,7 +31,7 @@
             <span>私信中心</span>
           </el-badge>
         </el-menu-item>
-        <el-menu-item v-if="Number(userStore.userInfo?.isAdmin || 0) === 1" index="/app/admin">
+        <el-menu-item v-if="Number(userStore.userInfo?.isAdmin || 0) >= 1" index="/app/admin">
           <el-icon><Setting /></el-icon>
           <span>后台管理</span>
         </el-menu-item>

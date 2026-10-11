@@ -97,8 +97,9 @@
       <div class="card-head">
         <div>
           <h3>用户管理</h3>
-          <p>支持全量用户筛选、VIP 调整、账号启停。</p>
+          <p>支持全量用户筛选、VIP 调整、账号启停{{ isSuperAdmin ? '；超级管理员可添加用户、调整身份' : '' }}。</p>
         </div>
+        <el-button v-if="isSuperAdmin" type="primary" size="small" @click="openAddUser">+ 添加用户</el-button>
       </div>
 
       <div class="filter-grid">
@@ -116,6 +117,7 @@
           <el-option label="禁用" :value="0" />
         </el-select>
         <el-select v-model="filters.isAdmin" placeholder="管理员身份" clearable>
+          <el-option label="超级管理员" :value="2" />
           <el-option label="管理员" :value="1" />
           <el-option label="普通用户" :value="0" />
         </el-select>
@@ -131,7 +133,8 @@
             <div class="user-cell">
               <div class="user-name-line">
                 <strong>{{ row.username }}</strong>
-                <el-tag v-if="Number(row.isAdmin || 0) === 1" size="small" type="danger" effect="dark">管理员</el-tag>
+                <el-tag v-if="Number(row.isAdmin || 0) === 2" size="small" type="danger" effect="dark">超级管理员</el-tag>
+                <el-tag v-else-if="Number(row.isAdmin || 0) === 1" size="small" type="warning" effect="dark">管理员</el-tag>
               </div>
               <span>ID: {{ row.id }}</span>
               <span>{{ row.email || '未绑定邮箱' }}</span>
@@ -178,6 +181,7 @@
           <template #default="{ row }">
             <div class="action-row">
               <el-button link type="primary" @click="openVipDialog(row)">调整 VIP</el-button>
+              <el-button v-if="isSuperAdmin" link type="warning" @click="openRoleDialog(row)">设身份</el-button>
               <el-button
                 link
                 :type="Number(row.status || 0) === 1 ? 'danger' : 'success'"
@@ -222,6 +226,57 @@
       <template #footer>
         <el-button @click="vipDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="vipSaving" @click="handleSaveVip">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 添加用户（仅超级管理员） -->
+    <el-dialog v-model="addUserDialogVisible" title="添加用户" width="460px" destroy-on-close>
+      <el-form :model="addUserForm" label-position="top">
+        <el-form-item label="用户名" required>
+          <el-input v-model="addUserForm.username" maxlength="32" placeholder="2-32 位字母/数字/下划线/中文" />
+        </el-form-item>
+        <el-form-item label="初始密码" required>
+          <el-input v-model="addUserForm.password" maxlength="20" show-password placeholder="6-20 位" />
+        </el-form-item>
+        <el-form-item label="邮箱（可选）">
+          <el-input v-model="addUserForm.email" placeholder="选填" />
+        </el-form-item>
+        <el-form-item label="VIP 等级">
+          <el-select v-model="addUserForm.vipRole" style="width: 100%">
+            <el-option v-for="item in vipOptions" :key="item.level" :label="item.levelName" :value="item.level" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="身份">
+          <el-radio-group v-model="addUserForm.isAdmin">
+            <el-radio :value="0">普通用户</el-radio>
+            <el-radio :value="1">管理员</el-radio>
+            <el-radio :value="2">超级管理员</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="addUserDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="addUserSaving" @click="handleAddUser">创建</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 修改身份（仅超级管理员） -->
+    <el-dialog v-model="roleDialogVisible" title="修改用户身份" width="440px" destroy-on-close>
+      <el-form label-position="top">
+        <el-form-item label="目标用户">
+          <el-input :model-value="roleTargetLabel" disabled />
+        </el-form-item>
+        <el-form-item label="身份">
+          <el-radio-group v-model="roleForm.isAdmin">
+            <el-radio :value="0">普通用户</el-radio>
+            <el-radio :value="1">管理员（发通知/查数据/调VIP）</el-radio>
+            <el-radio :value="2">超级管理员（可添加用户/改身份）</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="roleDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="roleSaving" @click="handleSaveRole">保存</el-button>
       </template>
     </el-dialog>
 
@@ -311,13 +366,27 @@
           <el-input v-model="announcementForm.content" type="textarea" :rows="5" placeholder="支持 HTML 内容" />
         </el-form-item>
         <el-form-item label="目标范围">
-          <el-radio-group v-model="announcementForm.targetType">
-            <el-radio :value="0">全部用户</el-radio>
-            <el-radio :value="1">指定用户</el-radio>
-          </el-radio-group>
+          <el-select v-model="announcementForm.targetType" style="width: 100%" @change="onAnnouncementTargetChange">
+            <el-option :value="0" label="全部用户" />
+            <el-option :value="2" label="指定 VIP 等级的用户" />
+            <el-option :value="1" label="指定用户（按 ID）" />
+          </el-select>
         </el-form-item>
         <el-form-item v-if="announcementForm.targetType === 1" label="目标用户ID">
           <el-input v-model="announcementForm.targetIds" placeholder="逗号分隔，如: 5,9,12" />
+        </el-form-item>
+        <el-form-item v-if="announcementForm.targetType === 2" label="VIP 等级">
+          <el-select
+            v-model="announcementTargetLevels"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="选择要通知的等级"
+            style="width: 100%"
+          >
+            <el-option v-for="item in vipOptions" :key="item.level" :label="item.levelName" :value="item.level" />
+          </el-select>
+          <p class="target-tip">VIP 已过期的用户按「普通用户」收到对应等级通知</p>
         </el-form-item>
         <el-form-item label="状态">
           <el-radio-group v-model="announcementForm.status">
@@ -338,6 +407,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/utils/request'
+import { useUserStore } from '@/stores/user'
 import {
   getAdminAnnouncementList,
   createAnnouncement,
@@ -345,6 +415,11 @@ import {
   deleteAnnouncement,
   toggleAnnouncementTop
 } from '@/api/notification'
+import { adminAddUser, adminUpdateUserRole } from '@/api/adminManage'
+
+const userStore = useUserStore()
+// 0-普通用户 1-管理员 2-超级管理员；只有超级管理员可添加用户/修改身份
+const isSuperAdmin = computed(() => Number(userStore.userInfo?.isAdmin || 0) >= 2)
 
 const dashboardLoading = ref(false)
 const tableLoading = ref(false)
@@ -610,11 +685,64 @@ onMounted(() => {
   fetchAnnouncementList()
 })
 
+// ===== 添加用户 / 修改身份（仅超级管理员） =====
+const addUserDialogVisible = ref(false)
+const addUserSaving = ref(false)
+const addUserForm = reactive({ username: '', password: '', email: '', vipRole: 0, isAdmin: 0 })
+
+const openAddUser = () => {
+  Object.assign(addUserForm, { username: '', password: '', email: '', vipRole: 0, isAdmin: 0 })
+  addUserDialogVisible.value = true
+}
+
+const handleAddUser = async () => {
+  if (!addUserForm.username.trim() || !addUserForm.password) {
+    ElMessage.warning('请填写用户名和初始密码')
+    return
+  }
+  addUserSaving.value = true
+  try {
+    await adminAddUser({ ...addUserForm, username: addUserForm.username.trim() })
+    ElMessage.success('用户已创建')
+    addUserDialogVisible.value = false
+    loadUsers()
+  } finally {
+    addUserSaving.value = false
+  }
+}
+
+const roleDialogVisible = ref(false)
+const roleSaving = ref(false)
+const roleForm = reactive({ userId: null, username: '', isAdmin: 0 })
+
+const roleTargetLabel = computed(() => {
+  const target = tableRows.value.find(item => item.id === roleForm.userId)
+  return target ? `${target.username}（# ${target.id}）` : roleForm.username
+})
+
+const openRoleDialog = (row) => {
+  Object.assign(roleForm, { userId: row.id, username: row.username, isAdmin: Number(row.isAdmin || 0) })
+  roleDialogVisible.value = true
+}
+
+const handleSaveRole = async () => {
+  roleSaving.value = true
+  try {
+    await adminUpdateUserRole({ userId: roleForm.userId, isAdmin: roleForm.isAdmin })
+    ElMessage.success('身份已更新')
+    roleDialogVisible.value = false
+    loadUsers()
+  } finally {
+    roleSaving.value = false
+  }
+}
+
 // ===== 公告管理 =====
 const announcementList = ref([])
 const announcementLoading = ref(false)
 const announcementSaving = ref(false)
 const announcementDialogVisible = ref(false)
+const announcementTargetLevels = ref([])
 const announcementPagination = reactive({ pageNum: 1, pageSize: 10, total: 0 })
 const announcementForm = reactive({
   id: null,
@@ -642,14 +770,33 @@ const fetchAnnouncementList = async () => {
 
 const handleCreateAnnouncement = () => {
   Object.assign(announcementForm, { id: null, title: '', content: '', type: 1, targetType: 0, targetIds: '', status: 1 })
+  announcementTargetLevels.value = []
   announcementDialogVisible.value = true
+}
+
+const onAnnouncementTargetChange = () => {
+  announcementForm.targetIds = ''
+  announcementTargetLevels.value = []
+}
+
+// 把 targetType=2 的等级列表与 targetIds 互转，统一提交格式
+const syncAnnouncementTargetIds = () => {
+  if (announcementForm.targetType === 2) {
+    announcementForm.targetIds = announcementTargetLevels.value.join(',')
+  }
 }
 
 const handleEditAnnouncement = (row) => {
   Object.assign(announcementForm, {
     id: row.id, title: row.title, content: row.content,
-    type: row.type, targetType: 0, targetIds: '', status: row.status
+    type: row.type,
+    targetType: Number(row.targetType || 0),
+    targetIds: row.targetIds || '',
+    status: row.status
   })
+  announcementTargetLevels.value = announcementForm.targetType === 2 && row.targetIds
+    ? row.targetIds.split(',').map(v => Number(v)).filter(v => !Number.isNaN(v))
+    : []
   announcementDialogVisible.value = true
 }
 
@@ -658,6 +805,15 @@ const handleSaveAnnouncement = async () => {
     ElMessage.warning('标题和内容不能为空')
     return
   }
+  if (announcementForm.targetType === 2 && !announcementTargetLevels.value.length) {
+    ElMessage.warning('请选择 VIP 等级')
+    return
+  }
+  if (announcementForm.targetType === 1 && !String(announcementForm.targetIds || '').trim()) {
+    ElMessage.warning('请填写目标用户 ID')
+    return
+  }
+  syncAnnouncementTargetIds()
   announcementSaving.value = true
   try {
     if (announcementForm.id) {
@@ -1004,6 +1160,12 @@ const handleDeleteAnnouncement = async (row) => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.target-tip {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #909399;
 }
 
 .pagination-wrap {
