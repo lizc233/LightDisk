@@ -63,12 +63,18 @@ export function markAllRead() {
 
 // ==================== 个人消息 ====================
 
-/** 获取个人消息列表 */
+/**
+ * 获取个人消息列表
+ * @param {{pageNum?:number,pageSize?:number,group?:'all'|'contact'|'stranger'}} params
+ */
 export function getMessageList(params) {
   return request.get('/messages', { params })
 }
 
-/** 管理员发送私信 */
+/**
+ * 发送私信（管理员与普通用户通用）
+ * @param {{receiverIds:string,title:string,content:string,autoAddContact?:boolean}} data
+ */
 export function sendPersonalMessage(data) {
   return request.post('/messages/send', data)
 }

@@ -25,6 +25,12 @@
           <el-icon><ChatDotRound /></el-icon>
           <span>AI 助手</span>
         </el-menu-item>
+        <el-menu-item index="/app/messages">
+          <el-icon><Message /></el-icon>
+          <el-badge :value="unreadCount" :hidden="unreadCount <= 0" :max="99" class="menu-badge">
+            <span>私信中心</span>
+          </el-badge>
+        </el-menu-item>
         <el-menu-item v-if="Number(userStore.userInfo?.isAdmin || 0) === 1" index="/app/admin">
           <el-icon><Setting /></el-icon>
           <span>后台管理</span>
@@ -85,7 +91,8 @@
             <NotificationPanel
               :refresh-version="notificationRefreshKey"
               @unread-updated="handleUnreadUpdated"
-              @close-panel="showNotificationPanel = false"
+              @write="openWriteDialog"
+              @close="showNotificationPanel = false"
             />
           </el-popover>
 
@@ -121,19 +128,23 @@
         </div>
       </el-main>
     </el-container>
+
+    <!-- 写私信弹窗 -->
+    <WriteMessageDialog v-model="writeDialogVisible" @sent="handleMessageSent" />
   </el-container>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, ChatDotRound, Delete, Document, Setting, Share } from '@element-plus/icons-vue'
+import { Bell, ChatDotRound, Delete, Document, Message, Setting, Share } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
 import { getSidebarAnnouncements } from '@/api/notification'
 import NotificationPanel from '@/components/NotificationPanel.vue'
+import WriteMessageDialog from '@/components/WriteMessageDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -153,7 +164,8 @@ const currentPageName = computed(() => {
     '/app/admin': '后台管理',
     '/app/profile': '个人中心',
     '/app/settings': '设置中心',
-    '/app/ai': 'AI 助手'
+    '/app/ai': 'AI 助手',
+    '/app/messages': '私信中心'
   }
   return map[route.path] || '网盘'
 })
@@ -225,6 +237,18 @@ const notices = ref([])
 const unreadCount = ref(0)
 const showNotificationPanel = ref(false)
 const notificationRefreshKey = ref(0)
+const writeDialogVisible = ref(false)
+
+// 打开写私信弹窗
+const openWriteDialog = () => {
+  showNotificationPanel.value = false
+  writeDialogVisible.value = true
+}
+
+// 私信发送成功后刷新未读数
+const handleMessageSent = () => {
+  notificationRefreshKey.value++
+}
 
 // 获取侧边栏公告
 const fetchNotices = async () => {

@@ -102,6 +102,17 @@
         </div>
       </section>
 
+      <section class="settings-card">
+        <h3>私信接收设置</h3>
+        <p class="card-desc">控制谁能给你发送站内私信。管理员发布的通知不受此限制。</p>
+
+        <el-radio-group v-model="settings.messagePolicy" class="policy-group">
+          <el-radio :label="0">所有人可发</el-radio>
+          <el-radio :label="1">仅联系人可发</el-radio>
+          <el-radio :label="2">不接收私信</el-radio>
+        </el-radio-group>
+      </section>
+
       <section class="settings-card full">
         <h3>文件打开偏好</h3>
         <p class="card-desc">点击文件行时会按这里的规则决定是预览还是直接下载，下载按钮本身仍然保持下载行为。</p>
@@ -154,7 +165,8 @@ const settings = reactive({
   imageOpenAction: 'preview',
   videoOpenAction: 'preview',
   docOpenAction: 'download',
-  otherOpenAction: 'download'
+  otherOpenAction: 'download',
+  messagePolicy: 0
 })
 
 const openActionOptions = [
@@ -171,6 +183,7 @@ const applySettings = (data = {}) => {
   settings.videoOpenAction = data.videoOpenAction || 'preview'
   settings.docOpenAction = data.docOpenAction || 'download'
   settings.otherOpenAction = data.otherOpenAction || 'download'
+  settings.messagePolicy = Number(data.messagePolicy || 0)
 }
 
 const syncUserStore = (data = {}) => {
@@ -184,7 +197,8 @@ const syncUserStore = (data = {}) => {
     imageOpenAction: data.imageOpenAction || settings.imageOpenAction,
     videoOpenAction: data.videoOpenAction || settings.videoOpenAction,
     docOpenAction: data.docOpenAction || settings.docOpenAction,
-    otherOpenAction: data.otherOpenAction || settings.otherOpenAction
+    otherOpenAction: data.otherOpenAction || settings.otherOpenAction,
+    messagePolicy: Number(data.messagePolicy ?? settings.messagePolicy)
   })
 }
 
@@ -213,7 +227,8 @@ const saveSettings = async () => {
       imageOpenAction: settings.imageOpenAction,
       videoOpenAction: settings.videoOpenAction,
       docOpenAction: settings.docOpenAction,
-      otherOpenAction: settings.otherOpenAction
+      otherOpenAction: settings.otherOpenAction,
+      messagePolicy: settings.messagePolicy
     })
     await loadSettings()
     ElMessage.success('设置已保存')
@@ -290,6 +305,13 @@ onMounted(() => {
 
 .settings-card.full {
   grid-column: 1 / -1;
+}
+
+.policy-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .settings-card h3 {

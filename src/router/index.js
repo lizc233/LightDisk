@@ -65,6 +65,11 @@ const routes = [
         path: 'ai',
         name: 'AiAssistant',
         component: () => import('@/views/ai/index.vue')
+      },
+      {
+        path: 'messages',
+        name: 'Messages',
+        component: () => import('@/views/messages/index.vue')
       }
     ]
   }

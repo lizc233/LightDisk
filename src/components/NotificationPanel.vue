@@ -11,7 +11,8 @@
         @click="activeTab = 'message'"
       >私信</span>
       <span class="tab-right">
-        <el-button link type="primary" size="small" @click="handleMarkAllRead" :disabled="unreadTotal === 0">
+        <el-button link type="primary" size="small" :icon="Promotion" @click="handleWrite">写私信</el-button>
+        <el-button link size="small" @click="handleMarkAllRead" :disabled="unreadTotal === 0">
           全部已读
         </el-button>
       </span>
@@ -30,9 +31,17 @@
           <el-icon v-else :size="18"><ChatDotRound /></el-icon>
         </div>
         <div class="notify-body">
-          <div class="notify-title">{{ item.title }}</div>
+          <div class="notify-title">
+            <span class="title-text">{{ item.title }}</span>
+            <el-tag
+              v-if="item.itemType === 'message' && item.senderId && !item.senderIsContact"
+              size="small"
+              type="danger"
+              effect="plain"
+            >陌生</el-tag>
+          </div>
           <div class="notify-desc" v-html="truncateContent(item.content)"></div>
-          <div class="notify-time">{{ formatTime(item.createdAt) }}</div>
+          <div class="notify-time">{{ formatRelativeTime(item.createdAt) }}</div>
         </div>
         <div class="notify-unread-dot" v-if="!item.isRead"></div>
       </div>
@@ -48,13 +57,20 @@
     <div class="panel-footer" v-if="total > pageSize">
       <el-button link size="small" @click="loadMore" :loading="loading">加载更多</el-button>
     </div>
+
+    <!-- 前往私信中心 -->
+    <div class="panel-footer panel-footer-link">
+      <el-button link size="small" type="primary" @click="handleViewAll">查看全部私信</el-button>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Bell, BellFilled, ChatDotRound } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { Bell, BellFilled, ChatDotRound, Promotion } from '@element-plus/icons-vue'
 import { getUnreadCount, getNotificationList, markAnnouncementRead, markMessageRead, markAllRead } from '@/api/notification'
+import { formatRelativeTime } from '@/utils/datetime'
 import { ElMessage } from 'element-plus'
 
 const props = defineProps({
@@ -62,7 +78,9 @@ const props = defineProps({
   refreshVersion: { type: Number, default: 0 }
 })
 
-const emit = defineEmits(['unread-updated'])
+const emit = defineEmits(['unread-updated', 'write', 'close'])
+
+const router = useRouter()
 
 // ===== 状态 =====
 const loading = ref(false)
@@ -152,18 +170,6 @@ function truncateContent(content) {
   return text.length > 60 ? text.substring(0, 60) + '...' : text
 }
 
-function formatTime(timeStr) {
-  if (!timeStr) return ''
-  const d = new Date(timeStr)
-  const now = new Date()
-  const diff = now - d
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前'
-  if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前'
-  if (diff < 604800000) return Math.floor(diff / 86400000) + ' 天前'
-  return d.toLocaleDateString()
-}
-
 // ===== 轮询未读数（每 30 秒） =====
 function startPolling() {
   stopPolling()
@@ -185,11 +191,22 @@ onUnmounted(() => {
 })
 
 // 监听外部刷新信号
-import { watch } from 'vue'
 watch(() => props.refreshVersion, () => {
   fetchUnreadCount()
   fetchList()
 })
+
+// 打开写私信弹窗（由父组件承载弹窗）
+function handleWrite() {
+  emit('write')
+}
+
+// 前往私信中心
+function handleViewAll() {
+  emit('unread-updated', unreadTotal.value)
+  emit('close')
+  router.push('/app/messages')
+}
 </script>
 
 <style scoped>
@@ -256,6 +273,11 @@ watch(() => props.refreshVersion, () => {
   font-weight: 500;
   color: #303133;
   line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.title-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
