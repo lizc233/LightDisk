@@ -709,6 +709,7 @@ const formatDate = (value, mode = 'datetime') => {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`
 }
 
+// ==================== 我的操作记录 ====================
 onMounted(() => {
   loadProfile()
   loadStorageStats()
@@ -721,6 +722,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+
 .profile-container {
   max-width: 1120px;
   margin: 0 auto;

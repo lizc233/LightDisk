@@ -6,7 +6,7 @@
         <span class="logo-text">LightDisk</span>
       </div>
 
-      <el-menu :default-active="activeMenu" class="side-menu" router>
+      <el-menu :default-active="activeMenu" :default-openeds="openedGroups" class="side-menu" router>
         <el-menu-item index="/app/disk">
           <el-icon><Document /></el-icon>
           <span>全部文件</span>
@@ -31,10 +31,32 @@
             <span>私信中心</span>
           </el-badge>
         </el-menu-item>
-        <el-menu-item v-if="Number(userStore.userInfo?.isAdmin || 0) >= 1" index="/app/admin">
-          <el-icon><Setting /></el-icon>
-          <span>后台管理</span>
+        <el-menu-item index="/app/activity">
+          <el-icon><Clock /></el-icon>
+          <span>操作记录</span>
         </el-menu-item>
+        <el-sub-menu v-if="Number(userStore.userInfo?.isAdmin || 0) >= 1" index="admin-group" class="admin-submenu">
+          <template #title>
+            <el-icon><Setting /></el-icon>
+            <span>后台管理</span>
+          </template>
+          <el-menu-item index="/app/admin">
+            <el-icon><DataBoard /></el-icon>
+            <span>数据大屏</span>
+          </el-menu-item>
+          <el-menu-item index="/app/admin/users">
+            <el-icon><User /></el-icon>
+            <span>用户管理</span>
+          </el-menu-item>
+          <el-menu-item index="/app/admin/announcements">
+            <el-icon><Bell /></el-icon>
+            <span>公告管理</span>
+          </el-menu-item>
+          <el-menu-item index="/app/admin/audit">
+            <el-icon><View /></el-icon>
+            <span>操作审计</span>
+          </el-menu-item>
+        </el-sub-menu>
       </el-menu>
 
       <div class="notice-card">
@@ -152,7 +174,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, ChatDotRound, Delete, Document, Message, Search, Setting, Share } from '@element-plus/icons-vue'
+import { Bell, ChatDotRound, Clock, DataBoard, Delete, Document, Message, Search, Setting, Share, User, View } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { extractShareCode, isValidShareCode } from '@/utils/share'
@@ -177,7 +199,11 @@ const currentPageName = computed(() => {
     '/app/disk': '全部文件',
     '/app/share': '我的分享',
     '/app/recycle': '回收站',
-    '/app/admin': '后台管理',
+    '/app/admin': '数据大屏',
+    '/app/admin/users': '用户管理',
+    '/app/admin/announcements': '公告管理',
+    '/app/admin/audit': '操作审计',
+    '/app/activity': '我的操作记录',
     '/app/profile': '个人中心',
     '/app/settings': '设置中心',
     '/app/ai': 'AI 助手',
@@ -185,6 +211,11 @@ const currentPageName = computed(() => {
   }
   return map[route.path] || '网盘'
 })
+
+/** 后台管理子菜单：位于后台相关路由时默认展开 */
+const openedGroups = computed(() =>
+  route.path.startsWith('/app/admin') ? ['admin-group'] : []
+)
 
 /**
  * 「整屏不滚动、内部区域独立滚动」的页面（文件页 / AI 助手）
@@ -398,6 +429,25 @@ watch(showNotificationPanel, (visible) => {
   background: linear-gradient(135deg, var(--accent), #19c37d) !important;
   color: #fff !important;
   box-shadow: 0 10px 24px rgba(16, 163, 127, 0.22);
+}
+
+/* 后台管理可折叠分组：标题行与普通菜单项同款观感 */
+.side-menu :deep(.el-sub-menu .el-sub-menu__title) {
+  margin: 8px 16px;
+  height: 48px;
+  border-radius: 14px;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+}
+
+.side-menu :deep(.el-sub-menu .el-sub-menu__title:hover) {
+  background: var(--accent-soft) !important;
+  color: var(--accent);
+  transform: translateX(4px);
+}
+
+.side-menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+  color: var(--accent);
 }
 
 .notice-card {

@@ -1,0 +1,386 @@
+/*
+ * 后台管理四页（数据大屏 / 用户管理 / 公告管理 / 操作审计）共享样式。
+ * 以全局样式引入（@import 在 scoped 块中不会附加 scope 属性），
+ * 类名均带 admin 语境，与其他页面冲突概率极低。
+ */
+.admin-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 8px 4px 36px;
+}
+
+.hero-card,
+.metric-card,
+.visual-card,
+.table-card {
+  background: linear-gradient(180deg, var(--surface-solid), var(--surface-muted));
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-soft);
+}
+
+.hero-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px 30px;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(251, 191, 36, 0.2), transparent 28%),
+    radial-gradient(circle at left bottom, rgba(59, 130, 246, 0.14), transparent 30%),
+    linear-gradient(180deg, var(--surface-solid), var(--surface-muted));
+}
+
+.hero-eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #c2410c;
+}
+
+.hero-card h1 {
+  margin: 0;
+  font-size: 34px;
+  color: var(--text-primary);
+}
+
+.hero-desc {
+  margin: 12px 0 0;
+  max-width: 720px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.metric-card {
+  padding: 22px 20px;
+  border-radius: 20px;
+}
+
+.metric-label {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.metric-value {
+  margin-top: 12px;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.metric-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.visual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.visual-card,
+.table-card {
+  border-radius: 24px;
+  padding: 24px;
+}
+
+.visual-card.full {
+  grid-column: 1 / -1;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.card-head h3 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--text-primary);
+}
+
+.card-head p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.head-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.08);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.trend-chart {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+  min-height: 260px;
+}
+
+.trend-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.trend-count,
+.trend-date {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.trend-bar-shell {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  height: 170px;
+  padding: 10px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--surface-muted), var(--surface-solid));
+}
+
+.trend-bar {
+  width: 100%;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #f59e0b, #f97316);
+  box-shadow: 0 14px 22px rgba(249, 115, 22, 0.28);
+  transition: height 0.2s ease;
+}
+
+.distribution-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.distribution-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.distribution-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-primary);
+}
+
+.distribution-bar-shell,
+.storage-bar-shell {
+  width: 100%;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-strong) 78%, var(--border-color) 22%);
+}
+
+.distribution-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #38bdf8);
+}
+
+.storage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.storage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.storage-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.storage-user {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.storage-user strong {
+  color: var(--text-primary);
+}
+
+.storage-user span,
+.storage-values {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.storage-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #10b981, #0ea5e9);
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(140px, 1fr)) auto;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.user-cell,
+.vip-cell,
+.usage-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.user-name-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-cell strong {
+  color: var(--text-primary);
+}
+
+.user-cell span,
+.vip-cell span,
+.usage-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.expired-text {
+  color: #dc2626 !important;
+}
+
+.user-table {
+  --el-table-bg-color: var(--surface-solid);
+  --el-table-tr-bg-color: var(--surface-solid);
+  --el-table-row-hover-bg-color: var(--surface-muted);
+  --el-table-header-bg-color: var(--surface-muted);
+  --el-table-text-color: var(--text-primary);
+  --el-table-border-color: var(--border-color);
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.target-tip {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #909399;
+}
+
+.pagination-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+/* ===== 操作审计 ===== */
+.audit-privacy {
+  margin-bottom: 14px;
+}
+
+.audit-filter {
+  margin-bottom: 4px;
+}
+
+.audit-ip {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.audit-noop {
+  color: var(--text-muted);
+}
+
+@media (max-width: 1440px) {
+  .overview-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1080px) {
+  .hero-card,
+  .card-head,
+  .storage-main {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .visual-grid,
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-page {
+    padding-bottom: 24px;
+  }
+
+  .hero-card,
+  .visual-card,
+  .table-card {
+    padding: 18px;
+    border-radius: 18px;
+  }
+
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trend-chart {
+    gap: 8px;
+  }
+}

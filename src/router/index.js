@@ -52,6 +52,26 @@ const routes = [
         component: () => import('@/views/admin/index.vue')
       },
       {
+        path: 'admin/users',
+        name: 'AdminUsers',
+        component: () => import('@/views/admin/users.vue')
+      },
+      {
+        path: 'admin/announcements',
+        name: 'AdminAnnouncements',
+        component: () => import('@/views/admin/announcements.vue')
+      },
+      {
+        path: 'admin/audit',
+        name: 'AdminAudit',
+        component: () => import('@/views/admin/audit.vue')
+      },
+      {
+        path: 'activity',
+        name: 'Activity',
+        component: () => import('@/views/activity/index.vue')
+      },
+      {
         path: 'profile',
         name: 'Profile',
         component: () => import('@/views/profile/index.vue')
@@ -87,7 +107,7 @@ router.beforeEach((to, from, next) => {
     return
   }
 
-  if (to.path === '/app/admin') {
+  if (to.path.startsWith('/app/admin')) {
     const userStore = useUserStore()
     const userInfo = userStore.userInfo || {}
     const hasAdminFlag = Object.prototype.hasOwnProperty.call(userInfo, 'isAdmin')
