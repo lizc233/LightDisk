@@ -150,7 +150,12 @@
 
     <!-- 在线文本编辑器 -->
     <TextEditorDialog v-model="editorVisible" :file-id="editorFileId" @saved="loadFileList" />
-    <DocxPreviewDialog v-model="docxVisible" :file-id="docxFileId" :file-name="docxFileName" />
+    <OfficePreviewDialog
+      v-model="officeVisible"
+      :file-id="officeFileId"
+      :file-name="officeFileName"
+      :kind="officeKind"
+    />
 
     <el-dialog
       v-model="shareDialogVisible"
@@ -255,7 +260,7 @@ import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import TextEditorDialog from '@/components/TextEditorDialog.vue'
-import DocxPreviewDialog from '@/components/DocxPreviewDialog.vue'
+import OfficePreviewDialog from '@/components/OfficePreviewDialog.vue'
 import {
   ArrowRight,
   Clock,
@@ -477,18 +482,19 @@ const handleRowClick = async (row) => {
     return
   }
 
-  // docx → 前端 docx-preview 在线预览（浏览器原生渲染不了 OOXML）
+  // docx → 前端 docx-preview 在线预览；doc → 后端 POI 解析后在线预览
   const ext = (row.name || '').split('.').pop().toLowerCase()
-  if (ext === 'docx') {
-    docxFileId.value = row.id
-    docxFileName.value = row.name
-    docxVisible.value = true
+  if (ext === 'docx' || ext === 'doc') {
+    officeFileId.value = row.id
+    officeFileName.value = row.name
+    officeKind.value = ext
+    officeVisible.value = true
     return
   }
 
   ElMessage.info('正在加载预览...')
   if (!isBrowserPreviewable(row)) {
-    ElMessage.warning('当前浏览器无法直接预览该文档（旧版 .doc 需转存为 .docx），已切换为下载')
+    ElMessage.warning('当前浏览器无法直接预览该文档，已切换为下载')
     handleDownload(row)
     return
   }
@@ -593,10 +599,11 @@ const resolveFileCategory = (row) => {
 const editorVisible = ref(false)
 const editorFileId = ref(null)
 
-// ===== Word 预览 =====
-const docxVisible = ref(false)
-const docxFileId = ref(null)
-const docxFileName = ref('')
+// ===== Word 预览（docx 前端渲染 / doc 后端解析）=====
+const officeVisible = ref(false)
+const officeFileId = ref(null)
+const officeFileName = ref('')
+const officeKind = ref('docx')
 const TEXT_EDITABLE_EXTS = ['txt', 'md', 'json', 'csv', 'log', 'xml', 'yml', 'yaml', 'ini', 'conf', 'properties', 'html', 'css', 'js', 'sql', 'bat', 'sh']
 
 const isTextEditable = (row) => {

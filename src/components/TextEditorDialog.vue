@@ -15,16 +15,56 @@
         <el-alert :title="reason || '该文件不支持在线编辑，仅提供只读查看'" type="warning" :closable="false" show-icon />
       </div>
 
-      <!-- P3：Markdown 左写右预览分栏 -->
+      <!-- P3：Markdown 左写右预览分栏 / CSV 表格视图 -->
       <div class="editor-body" :class="{ split: isMarkdown && showPreview }">
-        <div ref="editorHost" class="editor-host" :class="{ readonly: !editable }"></div>
+        <div
+          v-show="!(isCsv && csvView === 'table')"
+          ref="editorHost"
+          class="editor-host"
+          :class="{ readonly: !editable }"
+        ></div>
         <div v-if="isMarkdown && showPreview" class="md-preview md-preview-scope" v-html="previewHtml"></div>
+
+        <!-- CSV 表格视图（只读；切「源码」可编辑） -->
+        <div v-if="isCsv && csvView === 'table'" class="csv-wrap">
+          <el-empty
+            v-if="!csvParsed.headers.length"
+            description="没有解析到表格数据，可切到「源码」检查内容"
+          />
+          <template v-else>
+            <el-table
+              :data="csvRows"
+              height="56vh"
+              size="small"
+              border
+              stripe
+              class="csv-table"
+            >
+              <el-table-column type="index" label="#" width="56" fixed />
+              <el-table-column
+                v-for="(h, i) in csvParsed.headers"
+                :key="i"
+                :prop="'c' + i"
+                :label="h"
+                min-width="130"
+                show-overflow-tooltip
+              />
+            </el-table>
+            <p class="csv-hint">
+              共 {{ csvParsed.totalRows }} 行 × {{ csvParsed.headers.length }} 列{{ csvParsed.truncated ? '（仅显示前 2000 行）' : '' }}　·　表格视图只读，切「源码」可直接编辑
+            </p>
+          </template>
+        </div>
       </div>
 
       <p class="editor-meta">
         <span v-if="dirty" class="dirty-flag">● 有未保存修改</span>
         <span v-else class="clean-flag">已与服务器同步</span>
         <span class="meta-right">
+          <el-radio-group v-if="isCsv" v-model="csvView" size="small" style="margin-right: 14px">
+            <el-radio-button label="table">表格</el-radio-button>
+            <el-radio-button label="source">源码</el-radio-button>
+          </el-radio-group>
           <el-switch
             v-if="isMarkdown"
             v-model="showPreview"
@@ -93,6 +133,7 @@ import { EditorState } from '@codemirror/state'
 import { markdown } from '@codemirror/lang-markdown'
 import { json } from '@codemirror/lang-json'
 import { renderMarkdown } from '@/utils/markdown'
+import { parseCsv } from '@/utils/csv'
 import request from '@/utils/request'
 
 const props = defineProps({
@@ -116,10 +157,32 @@ const dirty = ref(false)
 const baseMd5 = ref('')
 const editorHost = ref(null)
 
-// P3 分栏预览
+// P3 分栏预览（docVersion 用于驱动实时刷新：CodeMirror 的 doc 不是响应式数据）
+const docVersion = ref(0)
 const showPreview = ref(true)
 const isMarkdown = computed(() => ['md', 'markdown'].includes(fileExt.value))
-const previewHtml = computed(() => renderMarkdown(currentText()))
+const previewHtml = computed(() => {
+  docVersion.value // 依赖它，敲字时实时重算
+  return renderMarkdown(currentText())
+})
+
+// P3 CSV 表格视图
+const isCsv = computed(() => fileExt.value === 'csv')
+const csvView = ref('table')
+const csvSnapshot = ref('')
+const csvParsed = computed(() => parseCsv(csvSnapshot.value))
+const csvRows = computed(() =>
+  csvParsed.value.rows.map((row) => {
+    const obj = {}
+    row.forEach((cell, i) => {
+      obj['c' + i] = cell
+    })
+    return obj
+  })
+)
+const refreshCsv = () => {
+  csvSnapshot.value = currentText()
+}
 
 // P2 历史版本
 const versionDrawer = ref(false)
@@ -149,6 +212,15 @@ watch(visible, (v) => {
   }
 })
 
+// CSV 视图切换：切到表格时重新解析；切回源码时让 CodeMirror 重新测量（否则可能显示空白）
+watch(csvView, (v) => {
+  if (v === 'table') {
+    refreshCsv()
+  } else if (editorView) {
+    nextTick(() => editorView && editorView.requestMeasure())
+  }
+})
+
 const loadContent = async () => {
   loading.value = true
   dirty.value = false
@@ -165,6 +237,8 @@ const loadContent = async () => {
     loading.value = false
     await nextTick()
     createEditor(data.content || '', editable.value, data.ext || '')
+    csvView.value = data.ext === 'csv' ? 'table' : 'source'
+    refreshCsv()
   } catch (e) {
     ElMessage.error(e?.response?.data?.msg || '读取文件内容失败')
     visible.value = false
@@ -177,7 +251,10 @@ const createEditor = (content, isEditable, ext) => {
   destroyEditor()
   if (!editorHost.value) return
   const updateListener = EditorView.updateListener.of((u) => {
-    if (u.docChanged) dirty.value = true
+    if (u.docChanged) {
+      dirty.value = true
+      docVersion.value++
+    }
   })
   editorView = new EditorView({
     state: EditorState.create({
@@ -207,6 +284,7 @@ const handleSave = async () => {
     })
     baseMd5.value = res.data || baseMd5.value
     dirty.value = false
+    refreshCsv()
     ElMessage.success('保存成功，已生成历史版本')
     emit('saved')
   } catch (e) {
@@ -279,6 +357,7 @@ const handleRollback = async (item) => {
     baseMd5.value = data.md5 || baseMd5.value
     await nextTick()
     createEditor(data.content || '', editable.value, data.ext || fileExt.value)
+    refreshCsv()
     fetchVersions()
   } catch (e) {
     ElMessage.error(e?.response?.data?.msg || '回滚失败')
@@ -351,6 +430,23 @@ const formatTime = (t) => {
 }
 .editor-readonly-tip {
   margin-bottom: 10px;
+}
+
+/* CSV 表格视图 */
+.csv-wrap {
+  width: 100%;
+  border: 1px solid var(--border-color, #dcdfe6);
+  border-radius: 8px;
+  padding: 10px 12px 4px;
+  background: #fff;
+}
+.csv-table {
+  width: 100%;
+}
+.csv-hint {
+  margin: 6px 0 4px;
+  font-size: 12px;
+  color: #909399;
 }
 .editor-meta {
   display: flex;
