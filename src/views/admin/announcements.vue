@@ -9,8 +9,32 @@
         <el-button type="primary" size="small" @click="handleCreateAnnouncement">+ 新建公告</el-button>
       </div>
 
+      <div v-if="selectedAnnouncements.length" class="batch-bar">
+        <div class="batch-info">
+          <el-icon><Select /></el-icon>
+          <span>已选 <strong>{{ selectedAnnouncements.length }}</strong> 条公告</span>
+        </div>
+        <div class="batch-actions">
+          <el-button size="small" @click="handleBatchAction('publish')">批量发布</el-button>
+          <el-button size="small" @click="handleBatchAction('withdraw')">批量撤回</el-button>
+          <el-button size="small" @click="handleBatchAction('top')">批量置顶</el-button>
+          <el-button size="small" @click="handleBatchAction('untop')">批量取消置顶</el-button>
+          <el-button size="small" type="danger" @click="handleBatchAction('delete')">批量删除</el-button>
+          <el-button size="small" text @click="clearSelection">取消选择</el-button>
+        </div>
+      </div>
+
       <!-- 公告列表 -->
-      <el-table :data="announcementList" v-loading="announcementLoading" stripe size="small">
+      <el-table
+        ref="announcementTableRef"
+        :data="announcementList"
+        v-loading="announcementLoading"
+        stripe
+        size="small"
+        row-key="id"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="46" />
         <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
         <el-table-column prop="type" label="类型" width="100" align="center">
           <template #default="{ row }">
@@ -125,13 +149,15 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Select } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import {
   getAdminAnnouncementList,
   createAnnouncement,
   updateAnnouncement,
   deleteAnnouncement,
-  toggleAnnouncementTop
+  toggleAnnouncementTop,
+  batchOperateAnnouncements
 } from '@/api/notification'
 
 const vipOptions = ref([])
@@ -171,8 +197,56 @@ const fetchAnnouncementList = async () => {
     })
     announcementList.value = Array.isArray(res.data?.list) ? res.data.list : []
     announcementPagination.total = Number(res.data?.total || 0)
+    selectedAnnouncements.value = []
   } finally {
     announcementLoading.value = false
+  }
+}
+
+// ===== 批量操作 =====
+const announcementTableRef = ref(null)
+const selectedAnnouncements = ref([])
+const batchSaving = ref(false)
+
+const BATCH_ACTION_LABEL = {
+  publish: '发布',
+  withdraw: '撤回',
+  top: '置顶',
+  untop: '取消置顶',
+  delete: '删除'
+}
+
+const handleSelectionChange = (rows) => {
+  selectedAnnouncements.value = rows || []
+}
+
+const clearSelection = () => {
+  announcementTableRef.value?.clearSelection()
+  selectedAnnouncements.value = []
+}
+
+const handleBatchAction = async (action) => {
+  if (!selectedAnnouncements.value.length) return
+  const label = BATCH_ACTION_LABEL[action] || action
+  try {
+    await ElMessageBox.confirm(
+      `确认批量${label}选中的 ${selectedAnnouncements.value.length} 条公告吗？`,
+      `批量${label}`,
+      { type: action === 'delete' ? 'warning' : 'info' }
+    )
+  } catch { return }
+
+  batchSaving.value = true
+  try {
+    const res = await batchOperateAnnouncements({
+      ids: selectedAnnouncements.value.map(item => item.id),
+      action
+    })
+    ElMessage.success(`已${label} ${res.data || 0} 条公告`)
+    await fetchAnnouncementList()
+    clearSelection()
+  } finally {
+    batchSaving.value = false
   }
 }
 

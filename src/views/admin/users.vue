@@ -34,7 +34,30 @@
         </div>
       </div>
 
-      <el-table :data="tableRows" v-loading="tableLoading" class="user-table">
+      <div v-if="selectedUsers.length" class="batch-bar">
+        <div class="batch-info">
+          <el-icon><Select /></el-icon>
+          <span>已选 <strong>{{ selectedUsers.length }}</strong> 个用户</span>
+        </div>
+        <div class="batch-actions">
+          <el-button size="small" @click="handleBatchStatus(1)">批量启用</el-button>
+          <el-button size="small" @click="handleBatchStatus(0)">批量禁用</el-button>
+          <el-button size="small" type="primary" @click="openBatchVipDialog">批量调整 VIP</el-button>
+          <el-button v-if="isSuperAdmin" size="small" @click="openBatchAddDialog">批量添加用户</el-button>
+          <el-button v-if="isSuperAdmin" size="small" type="danger" @click="handleBatchDelete">批量删除用户</el-button>
+          <el-button size="small" text @click="clearSelection">取消选择</el-button>
+        </div>
+      </div>
+
+      <el-table
+        ref="userTableRef"
+        :data="tableRows"
+        v-loading="tableLoading"
+        class="user-table"
+        row-key="id"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="46" :selectable="isSelectable" />
         <el-table-column label="用户" min-width="220">
           <template #default="{ row }">
             <div class="user-cell">
@@ -186,16 +209,66 @@
         <el-button type="primary" :loading="roleSaving" @click="handleSaveRole">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量调整 VIP -->
+    <el-dialog v-model="batchVipDialogVisible" title="批量调整 VIP 等级" width="460px" destroy-on-close>
+      <el-form label-position="top">
+        <el-form-item label="目标用户">
+          <el-input :model-value="`已选 ${selectedUsers.length} 个用户`" disabled />
+        </el-form-item>
+        <el-form-item label="目标等级">
+          <el-select v-model="batchVipForm.role" style="width: 100%">
+            <el-option v-for="item in vipOptions" :key="item.level" :label="item.levelName" :value="item.level" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="续期天数">
+          <el-input-number v-model="batchVipForm.durationDays" :min="1" :max="3650" :step="30" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchVipDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchSaving" @click="handleBatchVip">应用</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量添加用户（多行导入，仅超级管理员） -->
+    <el-dialog v-model="batchAddDialogVisible" title="批量添加用户" width="560px" destroy-on-close>
+      <p class="batch-add-tip">
+        每行一个用户，格式：<code>用户名,密码,邮箱(可选),VIP等级(可选),身份(可选)</code><br />
+        例：<code>zhangsan,123456,zhang@qq.com,1,0</code>（身份 0-用户 1-管理员 2-超管）
+      </p>
+      <el-input
+        v-model="batchAddText"
+        type="textarea"
+        :rows="8"
+        placeholder="zhangsan,123456&#10;lisi,123456,lisi@qq.com,2,0"
+      />
+      <p class="batch-add-preview">已解析 {{ parsedBatchUsers.length }} 条记录（最多 100 条）</p>
+      <template #footer>
+        <el-button @click="batchAddDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchSaving" :disabled="!parsedBatchUsers.length" @click="handleBatchAdd">
+          批量创建
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Select } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/datetime'
-import { adminAddUser, adminUpdateUserRole } from '@/api/adminManage'
+import {
+  adminAddUser,
+  adminUpdateUserRole,
+  adminBatchUserStatus,
+  adminBatchUserVip,
+  adminBatchAddUsers,
+  adminBatchDeleteUsers
+} from '@/api/adminManage'
 
 const userStore = useUserStore()
 // 0-普通用户 1-管理员 2-超级管理员；只有超级管理员可添加用户/修改身份
@@ -261,6 +334,8 @@ const loadUsers = async () => {
     })
     tableRows.value = Array.isArray(res.data?.list) ? res.data.list : []
     pagination.total = Number(res.data?.total || 0)
+    // 数据被整体替换后旧的行引用已失效，清空已选
+    selectedUsers.value = []
     vipOptions.value = Array.isArray(res.data?.vipOptions) && res.data.vipOptions.length
       ? res.data.vipOptions
       : vipOptions.value
@@ -400,6 +475,143 @@ const handleSaveRole = async () => {
 onMounted(() => {
   loadUsers()
 })
+
+// ===== 批量操作 =====
+const userTableRef = ref(null)
+const selectedUsers = ref([])
+const batchSaving = ref(false)
+const batchVipDialogVisible = ref(false)
+const batchAddDialogVisible = ref(false)
+const batchAddText = ref('')
+const batchVipForm = reactive({ role: 0, durationDays: 365 })
+
+const handleSelectionChange = (rows) => {
+  selectedUsers.value = rows || []
+}
+
+const clearSelection = () => {
+  userTableRef.value?.clearSelection()
+  selectedUsers.value = []
+}
+
+/** 超级管理员账号不允许在批量操作里被误伤 */
+const isSelectable = (row) => Number(row.isAdmin || 0) < 2
+
+const handleBatchStatus = async (status) => {
+  if (!selectedUsers.value.length) return
+  const actionText = status === 1 ? '启用' : '禁用'
+  try {
+    await ElMessageBox.confirm(
+      `确认${actionText}选中的 ${selectedUsers.value.length} 个账号吗？`,
+      `批量${actionText}`,
+      { type: status === 1 ? 'success' : 'warning' }
+    )
+  } catch { return }
+  await runBatch(() => adminBatchUserStatus({
+    userIds: selectedUsers.value.map(item => item.id),
+    status
+  }), `账号已批量${actionText}`)
+}
+
+const openBatchVipDialog = () => {
+  if (!selectedUsers.value.length) return
+  batchVipForm.role = 0
+  batchVipForm.durationDays = 365
+  batchVipDialogVisible.value = true
+}
+
+const handleBatchVip = async () => {
+  await runBatch(() => adminBatchUserVip({
+    userIds: selectedUsers.value.map(item => item.id),
+    role: batchVipForm.role,
+    durationDays: batchVipForm.durationDays
+  }), 'VIP 等级已批量更新')
+  batchVipDialogVisible.value = false
+}
+
+const openBatchAddDialog = () => {
+  batchAddText.value = ''
+  batchAddDialogVisible.value = true
+}
+
+/** 解析多行导入文本：用户名,密码,邮箱,VIP等级,身份 */
+const parsedBatchUsers = computed(() => {
+  return batchAddText.value
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(0, 100)
+    .map((line) => {
+      const parts = line.split(',').map(part => part.trim())
+      return {
+        username: parts[0] || '',
+        password: parts[1] || '',
+        email: parts[2] || '',
+        vipRole: parts[3] ? Number(parts[3]) : 0,
+        isAdmin: parts[4] ? Number(parts[4]) : 0
+      }
+    })
+    .filter(item => item.username)
+})
+
+const handleBatchAdd = async () => {
+  const users = parsedBatchUsers.value
+  if (!users.length) {
+    ElMessage.warning('请至少填写一行有效记录')
+    return
+  }
+  batchSaving.value = true
+  try {
+    const res = await adminBatchAddUsers({ users })
+    const data = res.data || {}
+    if (data.failed) {
+      const detail = (data.details || []).join('；')
+      ElMessage.warning(`成功 ${data.success} 个，失败 ${data.failed} 个${detail ? '（' + detail + '）' : ''}`)
+    } else {
+      ElMessage.success(`已批量创建 ${data.success} 个用户`)
+    }
+    batchAddDialogVisible.value = false
+    await loadUsers()
+    clearSelection()
+  } finally {
+    batchSaving.value = false
+  }
+}
+
+const handleBatchDelete = async () => {
+  if (!selectedUsers.value.length) return
+  const names = selectedUsers.value.map(item => item.username).join('、')
+  try {
+    await ElMessageBox.confirm(
+      `将删除 ${selectedUsers.value.length} 个用户（${names}）及其全部网盘数据，此操作不可恢复！`,
+      '批量删除用户',
+      { type: 'error', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+    )
+  } catch { return }
+  await runBatch(() => adminBatchDeleteUsers({
+    userIds: selectedUsers.value.map(item => item.id)
+  }), '用户已批量删除')
+}
+
+/** 统一的批量结果提示 */
+const runBatch = async (runner, successText) => {
+  batchSaving.value = true
+  try {
+    const res = await runner()
+    const data = res.data || {}
+    const skipped = Number(data.skipped || 0)
+    if (skipped) {
+      const detail = (data.details || []).join('；')
+      ElMessage.warning(`${successText}，成功 ${data.success} 个，跳过 ${skipped} 个${detail ? '（' + detail + '）' : ''}`)
+    } else {
+      ElMessage.success(successText)
+    }
+    await loadUsers()
+    clearSelection()
+  } finally {
+    batchSaving.value = false
+  }
+}
 </script>
 
 <style scoped>

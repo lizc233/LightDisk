@@ -27,6 +27,11 @@ export function toggleAnnouncementTop(id) {
   return request.put(`/admin/announcements/${id}/top`)
 }
 
+/** 批量操作公告：{ ids, action: delete|top|untop|publish|withdraw } */
+export function batchOperateAnnouncements(data) {
+  return request.post('/admin/announcements/batch', data)
+}
+
 // ==================== 用户端：侧边栏公告 ====================
 
 /** 获取侧边栏轮播公告（后台接口，失败静默） */

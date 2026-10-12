@@ -6,6 +6,8 @@
       sub="仅自己可见：登录、文件、分享、私信等操作流水；管理员审计不包含私人文件与私信明细。"
     >
       <template #actions>
+        <el-button size="small" @click="exportLogs('csv')">导出 CSV</el-button>
+        <el-button size="small" @click="exportLogs('json')">导出 JSON</el-button>
         <el-button size="small" text :icon="Refresh" @click="loadActivity()">刷新</el-button>
       </template>
     </PageHeader>
@@ -54,9 +56,11 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import PageHeader from '@/components/PageHeader.vue'
 import { parseDateValue } from '@/utils/datetime'
+import { buildOperationLogExportUrl } from '@/api/adminManage'
 
 const activityModules = ['账号', '文件', '回收站', '分享', '私信', '会员', '管理']
 const activityModule = ref('')
@@ -115,6 +119,16 @@ const loadActivity = async (page) => {
   } finally {
     activityLoading.value = false
   }
+}
+
+/** 导出我的操作记录：浏览器直接另存（token 走查询参数，支持 CSV / JSON） */
+const exportLogs = (format) => {
+  const url = buildOperationLogExportUrl(
+    { module: activityModule.value || undefined },
+    format
+  )
+  window.open(url, '_self')
+  ElMessage.success(`正在导出 ${format.toUpperCase()} ...`)
 }
 
 onMounted(() => {

@@ -90,6 +90,51 @@
           <el-icon><FolderAdd /></el-icon>
           <span>新建文件夹</span>
         </div>
+        <div class="action-tile light" :class="{ 'tile-active': batchMode }" @click="batchMode ? exitBatchMode() : enterBatchMode()">
+          <el-icon><Select /></el-icon>
+          <span>{{ batchMode ? '退出批量' : '批量下载' }}</span>
+        </div>
+      </div>
+
+      <!-- 视图切换：仅在「图片」分类下出现 -->
+      <div v-if="showViewToggle" class="list-toolbar">
+        <span class="toolbar-label">展示方式</span>
+        <div class="view-switch">
+          <button class="view-btn" :class="{ on: listMode === 'grid' }" @click="setListMode('grid')">
+            <el-icon><Grid /></el-icon>
+            <span>缩略图</span>
+          </button>
+          <button class="view-btn" :class="{ on: listMode === 'detail' }" @click="setListMode('detail')">
+            <el-icon><List /></el-icon>
+            <span>详细列表</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 批量操作条 -->
+      <div v-if="batchMode" class="batch-bar">
+        <div class="batch-info">
+          <el-icon><Select /></el-icon>
+          <span>已选 <strong>{{ selected.length }}</strong> 项（星标位置已切换为多选框）</span>
+        </div>
+        <div class="batch-actions">
+          <el-button size="small" @click="toggleSelectAllPage">
+            {{ allPageSelected ? '取消全选' : '全选本页' }}
+          </el-button>
+          <el-button
+            size="small"
+            type="primary"
+            :disabled="!selected.length"
+            :loading="batchDownloading"
+            @click="submitBatchDownload"
+          >
+            <el-icon><Download /></el-icon>&nbsp;批量下载
+          </el-button>
+          <el-button size="small" :disabled="!selected.length" @click="openBatchMoveDialog">批量移动</el-button>
+          <el-button size="small" :disabled="!selected.length" @click="openBatchShareDialog">批量分享</el-button>
+          <el-button size="small" type="danger" :disabled="!selected.length" @click="submitBatchDelete">批量删除</el-button>
+          <el-button size="small" text @click="exitBatchMode">退出批量</el-button>
+        </div>
       </div>
 
       <input
@@ -100,12 +145,30 @@
       />
 
       <div class="file-list-wrapper">
-        <el-table :data="displayTableData" class="custom-table" @row-click="handleRowClick">
+        <el-table v-if="listMode === 'detail'" :data="displayTableData" class="custom-table" @row-click="handleRowClick">
           <el-table-column label="名称" min-width="320">
+            <template #header>
+              <div class="name-header">
+                <el-checkbox
+                  v-if="batchMode"
+                  :model-value="allPageSelected"
+                  :indeterminate="somePageSelected"
+                  @change="toggleSelectAllPage"
+                />
+                <span>名称</span>
+              </div>
+            </template>
             <template #default="{ row }">
               <div class="file-info-cell">
+                <el-checkbox
+                  v-if="batchMode"
+                  class="select-checkbox"
+                  :model-value="isSelected(row)"
+                  @change="(checked) => toggleSelect(row, checked)"
+                  @click.stop
+                />
                 <button
-                  v-if="!row.isFolder"
+                  v-else-if="!row.isFolder"
                   class="star-btn"
                   :class="{ on: row.isFavorite }"
                   :title="row.isFavorite ? '取消收藏' : '收藏'"
@@ -113,7 +176,15 @@
                 >
                   <el-icon><StarFilled v-if="row.isFavorite" /><Star v-else /></el-icon>
                 </button>
-                <el-icon class="file-icon" :size="24" :color="getIconColor(row)">
+                <img
+                  v-if="isImageFile(row) && !failedThumbs[row.key]"
+                  class="row-thumb"
+                  :src="thumbUrl(row, 120)"
+                  :alt="row.name"
+                  @error="markThumbFailed(row.key)"
+                  @click.stop="openGallery(row)"
+                />
+                <el-icon v-else class="file-icon" :size="24" :color="getIconColor(row)">
                   <component :is="getIconComponent(row)" />
                 </el-icon>
                 <span class="file-name">{{ row.name }}</span>
@@ -172,6 +243,52 @@
             </template>
           </el-table-column>
         </el-table>
+
+        <!-- 缩略图（画廊）视图：图片分类专用，点击任意图片进入全屏画廊 -->
+        <div v-else class="thumb-grid">
+          <div
+            v-for="row in displayTableData"
+            :key="row.key"
+            class="thumb-card"
+            :class="{ selected: isSelected(row) }"
+            @click="handleCardClick(row)"
+          >
+            <div class="thumb-media">
+              <img
+                v-if="isImageFile(row) && !failedThumbs[row.key]"
+                :src="thumbUrl(row, 480)"
+                :alt="row.name"
+                loading="lazy"
+                @error="markThumbFailed(row.key)"
+              />
+              <el-icon v-else :size="42" :color="getIconColor(row)">
+                <component :is="getIconComponent(row)" />
+              </el-icon>
+
+              <el-checkbox
+                v-if="batchMode"
+                class="card-check"
+                :model-value="isSelected(row)"
+                @change="(checked) => toggleSelect(row, checked)"
+                @click.stop
+              />
+              <button
+                v-else
+                class="card-star"
+                :class="{ on: row.isFavorite }"
+                :title="row.isFavorite ? '取消收藏' : '收藏'"
+                @click.stop="toggleFavorite(row)"
+              >
+                <el-icon><StarFilled v-if="row.isFavorite" /><Star v-else /></el-icon>
+              </button>
+              <span v-if="isImageFile(row)" class="card-zoom">
+                <el-icon><ZoomIn /></el-icon>
+              </span>
+            </div>
+            <div class="thumb-name" :title="row.name">{{ row.name }}</div>
+          </div>
+          <div v-if="!displayTableData.length" class="thumb-empty">当前分类下还没有图片</div>
+        </div>
 
         <div class="pagination-container">
           <el-pagination
@@ -241,14 +358,14 @@
 
     <el-dialog
       v-model="moveDialogVisible"
-      title="移入文件夹"
+      :title="batchMoveMode ? '批量移动到文件夹' : '移入文件夹'"
       width="440px"
       destroy-on-close
     >
       <div class="move-dialog-body">
         <div class="move-current-file">
-          <span class="move-label">当前文件</span>
-          <strong>{{ moveTargetFile?.name || '-' }}</strong>
+          <span class="move-label">{{ batchMoveMode ? '待移动' : '当前文件' }}</span>
+          <strong>{{ batchMoveMode ? `已选 ${selected.length} 项` : (moveTargetFile?.name || '-') }}</strong>
         </div>
 
         <button
@@ -286,10 +403,57 @@
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="moveDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="movingFile" @click="submitMoveFile">确认移入</el-button>
+          <el-button type="primary" :loading="movingFile" @click="submitMoveFile">
+            {{ batchMoveMode ? '确认批量移动' : '确认移入' }}
+          </el-button>
         </div>
       </template>
     </el-dialog>
+
+    <!-- 批量分享：一次为多个文件生成链接，可一键复制全部 -->
+    <el-dialog v-model="batchShareVisible" title="批量分享" width="560px" destroy-on-close>
+      <div v-if="!batchShareResult" class="share-box">
+        <p class="share-desc">将为选中的 {{ selectedFileIds.length }} 个文件各生成一条分享链接</p>
+        <el-radio-group v-model="batchShareForm.expireDays" class="modern-radio">
+          <el-radio-button :label="7">7天</el-radio-button>
+          <el-radio-button :label="15">15天</el-radio-button>
+          <el-radio-button :label="30">30天</el-radio-button>
+        </el-radio-group>
+      </div>
+
+      <div v-else class="batch-share-result">
+        <div class="batch-share-head">
+          <span>已生成 {{ batchShareResult.length }} 条链接</span>
+          <el-button size="small" text type="primary" @click="copyBatchShareMessage">复制全部</el-button>
+        </div>
+        <div class="batch-share-list">
+          <div v-for="item in batchShareResult" :key="item.id" class="batch-share-row">
+            <div class="batch-share-file" :title="item.fileName">{{ item.fileName }}</div>
+            <div class="batch-share-link">
+              <el-input :model-value="item.shareUrl" readonly size="small" />
+              <span class="batch-share-code">提取码 {{ item.extractCode }}</span>
+              <el-button size="small" text type="primary" @click="copyText(item.shareUrl)">复制</el-button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="batchShareVisible = false">关闭</el-button>
+          <el-button v-if="!batchShareResult" type="primary" :loading="batchSharing" @click="submitBatchShare">
+            生成链接
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 全屏图片画廊 -->
+    <ImageGallery
+      v-model="galleryVisible"
+      :images="galleryImages"
+      :start-index="galleryIndex"
+    />
 
     <!-- 标签管理（新建 / 改名 / 换色 / 删除） -->
     <el-dialog v-model="tagManageVisible" title="标签管理" width="520px" destroy-on-close>
@@ -339,6 +503,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import TextEditorDialog from '@/components/TextEditorDialog.vue'
 import OfficePreviewDialog from '@/components/OfficePreviewDialog.vue'
+import ImageGallery from '@/components/ImageGallery.vue'
 import {
   ArrowRight,
   Clock,
@@ -349,15 +514,19 @@ import {
   Folder,
   FolderAdd,
   FolderOpened,
+  Grid,
+  List,
   MoreFilled,
   Picture,
   Search,
+  Select,
   Setting,
   Share,
   Star,
   StarFilled,
   Upload,
-  VideoCamera
+  VideoCamera,
+  ZoomIn
 } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -425,6 +594,7 @@ const activateEntry = async (entry) => {
   currentCategory.value = 'all'
   isRecentMode.value = true
   currentPage.value = 1
+  listMode.value = 'detail'
   await goToFolder(0, { preserveFilters: true })
 }
 
@@ -548,6 +718,195 @@ const saveFileTags = async () => {
   }
 }
 
+// ===== 图片画廊 + 缩略图视图 =====
+const LIST_MODE_KEY = 'lightdisk.disk.listMode'
+const listMode = ref(localStorage.getItem(LIST_MODE_KEY) || 'detail')      // detail | grid
+const failedThumbs = reactive({})                                          // 缩略图 404 → 回落成图标
+const galleryVisible = ref(false)
+const galleryIndex = ref(0)
+
+/** 「图片」分类下（或已切到缩略图视图时）才显示视图切换，避免无路可退 */
+const showViewToggle = computed(() => currentCategory.value === 'image' || listMode.value === 'grid')
+
+const setListMode = (mode) => {
+  listMode.value = mode
+  localStorage.setItem(LIST_MODE_KEY, mode)
+}
+
+const isImageFile = (row) => !row.isFolder && resolveFileCategory(row) === 'image'
+
+const thumbUrl = (row, size = 240) => `/api/file/thumbnail/${row.id}?token=${getToken()}&size=${size}`
+
+const markThumbFailed = (key) => {
+  failedThumbs[key] = true
+}
+
+/** 当前列表里的所有图片 → 画廊数据源（左右切换只在图片之间进行） */
+const galleryImages = computed(() => displayTableData.value
+  .filter(row => isImageFile(row))
+  .map(row => ({
+    key: row.key,
+    id: row.id,
+    name: row.name,
+    url: `/api/file/preview/${row.id}?token=${getToken()}`,
+    thumbUrl: thumbUrl(row, 160)
+  })))
+
+const openGallery = (row) => {
+  const list = galleryImages.value
+  if (!list.length) return
+  const idx = list.findIndex(item => item.key === row.key)
+  galleryIndex.value = idx < 0 ? 0 : idx
+  galleryVisible.value = true
+}
+
+const handleCardClick = (row) => {
+  if (batchMode.value) {
+    toggleSelect(row, !isSelected(row))
+    return
+  }
+  if (isImageFile(row)) {
+    openGallery(row)
+    return
+  }
+  handleRowClick(row)
+}
+
+// ===== 批量操作 =====
+const batchMode = ref(false)
+const selected = ref([])
+const batchDownloading = ref(false)
+const batchMoveMode = ref(false)
+const batchShareVisible = ref(false)
+const batchSharing = ref(false)
+const batchShareResult = ref(null)
+const batchShareForm = reactive({ expireDays: 15 })
+
+const selectedFileIds = computed(() => selected.value.filter(row => !row.isFolder).map(row => row.id))
+const selectedFolderIds = computed(() => selected.value.filter(row => row.isFolder).map(row => row.id))
+const isSelected = (row) => selected.value.some(item => item.key === row.key)
+const allPageSelected = computed(() => displayTableData.value.length > 0
+  && displayTableData.value.every(row => isSelected(row)))
+const somePageSelected = computed(() => !allPageSelected.value
+  && displayTableData.value.some(row => isSelected(row)))
+
+const enterBatchMode = () => {
+  batchMode.value = true
+  selected.value = []
+  ElMessage.info('已进入批量模式，勾选文件后可批量下载/移动/分享/删除')
+}
+
+const exitBatchMode = () => {
+  batchMode.value = false
+  selected.value = []
+}
+
+const toggleSelect = (row, checked) => {
+  if (checked) {
+    if (!isSelected(row)) selected.value = [...selected.value, row]
+  } else {
+    selected.value = selected.value.filter(item => item.key !== row.key)
+  }
+}
+
+const toggleSelectAllPage = () => {
+  selected.value = allPageSelected.value ? [] : [...displayTableData.value]
+}
+
+const stamp = () => {
+  const d = new Date()
+  const p = (n) => `${n}`.padStart(2, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+const saveBlob = (blob, filename) => {
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(url)
+}
+
+const submitBatchDownload = async () => {
+  if (!selected.value.length) {
+    ElMessage.warning('请先勾选要下载的文件')
+    return
+  }
+  batchDownloading.value = true
+  try {
+    const blob = await request.post('/file/batch-download', {
+      fileIds: selectedFileIds.value,
+      folderIds: selectedFolderIds.value
+    }, { responseType: 'blob', timeout: 0 })
+
+    if (blob instanceof Blob && blob.type && blob.type.includes('json')) {
+      const payload = JSON.parse(await blob.text())
+      throw new Error(payload?.msg || '打包失败')
+    }
+    saveBlob(blob, `LightDisk_批量下载_${stamp()}.zip`)
+    ElMessage.success(`已开始下载 ${selected.value.length} 项`)
+  } catch (e) {
+    ElMessage.error(e.message || '批量下载失败')
+  } finally {
+    batchDownloading.value = false
+  }
+}
+
+const submitBatchDelete = async () => {
+  if (!selected.value.length) return
+  try {
+    await ElMessageBox.confirm(
+      `确认把选中的 ${selected.value.length} 项移入回收站吗？`,
+      '批量删除',
+      { type: 'warning', confirmButtonText: '移入回收站', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  await request.put('/file/recycle/trash', {
+    fileIds: selectedFileIds.value,
+    folderIds: selectedFolderIds.value
+  })
+  ElMessage.success('已移入回收站')
+  selected.value = []
+  await loadFolderCatalog()
+  await loadFileList()
+}
+
+const openBatchShareDialog = () => {
+  if (!selectedFileIds.value.length) {
+    ElMessage.warning('文件夹暂不支持分享，请勾选文件')
+    return
+  }
+  batchShareResult.value = null
+  batchShareForm.expireDays = Number(userStore.userInfo?.defaultShareExpireDays || 15)
+  batchShareVisible.value = true
+}
+
+const submitBatchShare = async () => {
+  batchSharing.value = true
+  try {
+    const res = await request.post('/share/batch-create', {
+      fileIds: selectedFileIds.value,
+      expireDays: batchShareForm.expireDays
+    })
+    batchShareResult.value = res.data || []
+    ElMessage.success(`已生成 ${(res.data || []).length} 条分享链接`)
+  } finally {
+    batchSharing.value = false
+  }
+}
+
+const copyBatchShareMessage = async () => {
+  if (!batchShareResult.value?.length) return
+  const text = batchShareResult.value
+    .map(item => `${item.fileName}\n链接：${item.shareUrl}\n提取码：${item.extractCode}`)
+    .join('\n\n')
+  await copyText(text)
+}
+
 const shareDialogVisible = ref(false)
 const sharing = ref(false)
 const currentFile = ref(null)
@@ -662,8 +1021,12 @@ const loadFileList = async () => {
     total.value = res.data.total
     tableData.value = (res.data.records || []).map(item => ({
       id: item.id,
+      // 文件与文件夹可能同 id，用前缀拼出稳定且唯一的选择键
+      key: (item.type === 'folder' ? 'd' : 'f') + item.id,
       name: item.name,
       type: item.type,
+      size: item.size,
+      ext: item.ext,
       date: formatTime(item.updateTime),
       isFavorite: item.isFavorite === 1,
       tags: item.tags || [],
@@ -701,6 +1064,10 @@ const switchCategory = async (category, recent) => {
   isRecentMode.value = recent
   activeFilterKey.value = ''
   currentPage.value = 1
+  // 缩略图视图只在「图片」分类下有意义，切走时回到详细列表
+  if (category !== 'image' || recent) {
+    listMode.value = 'detail'
+  }
 
   if (category !== 'all' || recent) {
     await goToFolder(0, { preserveFilters: true })
@@ -724,10 +1091,21 @@ const handleCurrentChange = async (value) => {
 const getToken = () => localStorage.getItem('token') || localStorage.getItem('satoken') || ''
 
 const handleRowClick = async (row) => {
+  if (batchMode.value) {
+    toggleSelect(row, !isSelected(row))
+    return
+  }
+
   if (row.isFolder) {
     currentCategory.value = 'all'
     isRecentMode.value = false
     await goToFolder(row.id)
+    return
+  }
+
+  // 图片 → 全屏画廊（跟随用户设置的图片打开方式）
+  if (isImageFile(row) && resolveOpenAction(row) === 'preview') {
+    openGallery(row)
     return
   }
 
@@ -959,12 +1337,24 @@ const handleFileUpload = async (event) => {
 }
 
 const openMoveDialog = async (row) => {
+  batchMoveMode.value = false
   moveTargetFile.value = row
   moveTargetFolderId.value = currentFolderId.value
   moveDialogVisible.value = true
   await loadFolderCatalog()
   await nextTick()
   folderTreeRef.value?.setCurrentKey(moveTargetFolderId.value)
+}
+
+const openBatchMoveDialog = async () => {
+  if (!selected.value.length) return
+  batchMoveMode.value = true
+  moveTargetFile.value = null
+  moveTargetFolderId.value = currentFolderId.value
+  moveDialogVisible.value = true
+  await loadFolderCatalog()
+  await nextTick()
+  folderTreeRef.value?.setCurrentKey(currentFolderId.value || null)
 }
 
 const selectMoveFolder = (folderId) => {
@@ -981,6 +1371,26 @@ const handleFolderNodeClick = (data) => {
 }
 
 const submitMoveFile = async () => {
+  if (batchMoveMode.value) {
+    if (!selected.value.length) return
+    movingFile.value = true
+    try {
+      const res = await request.put('/file/batch/move', {
+        fileIds: selectedFileIds.value,
+        folderIds: selectedFolderIds.value,
+        folderId: moveTargetFolderId.value
+      })
+      ElMessage.success(`已移动 ${res.data || 0} 项`)
+      moveDialogVisible.value = false
+      selected.value = []
+      await loadFolderCatalog()
+      await loadFileList()
+    } finally {
+      movingFile.value = false
+    }
+    return
+  }
+
   if (!moveTargetFile.value) return
 
   movingFile.value = true
@@ -1484,5 +1894,276 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+/* ===== 批量模式 / 视图切换 / 缩略图 ===== */
+
+.action-tile.tile-active {
+  border-color: #0061fe;
+  background: #eef4ff;
+  color: #0061fe;
+}
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+
+.toolbar-label {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.view-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-color);
+}
+
+.view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.view-btn:hover {
+  color: #0061fe;
+}
+
+.view-btn.on {
+  background: var(--surface-solid);
+  color: #0061fe;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 97, 254, 0.28);
+  background: linear-gradient(90deg, rgba(0, 97, 254, 0.08), rgba(0, 97, 254, 0.02));
+  flex-shrink: 0;
+}
+
+.batch-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.batch-info strong {
+  color: #0061fe;
+}
+
+.batch-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.name-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.select-checkbox {
+  width: 26px;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.row-thumb {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  cursor: zoom-in;
+  background: var(--surface-muted);
+}
+
+.thumb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 16px;
+  padding: 16px 2px 8px;
+}
+
+.thumb-card {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  background: var(--surface-solid);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.thumb-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.1);
+  border-color: rgba(0, 97, 254, 0.42);
+}
+
+.thumb-card.selected {
+  border-color: #0061fe;
+  box-shadow: 0 0 0 2px rgba(0, 97, 254, 0.18);
+}
+
+.thumb-media {
+  position: relative;
+  height: 136px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.thumb-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.card-star,
+.card-check {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+}
+
+.card-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  color: #c8ccd4;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.card-star:hover,
+.card-star.on {
+  color: #f7b955;
+}
+
+.card-check {
+  padding: 4px 6px;
+}
+
+.card-zoom {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.thumb-card:hover .card-zoom {
+  opacity: 1;
+}
+
+.thumb-name {
+  padding: 9px 11px;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thumb-empty {
+  grid-column: 1 / -1;
+  padding: 60px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* 批量分享结果 */
+.batch-share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.batch-share-list {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.batch-share-row {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--surface-muted);
+}
+
+.batch-share-file {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-share-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-share-code {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 </style>
