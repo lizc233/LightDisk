@@ -746,14 +746,17 @@ onMounted(async () => {
 .dropbox-container {
   display: flex;
   height: 100%;
+  min-height: 0;
   background: var(--surface-solid);
 }
 
 .sub-sidebar {
   width: 240px;
+  flex-shrink: 0;
   background: var(--surface-muted);
   border-right: 1px solid var(--border-color);
   padding: 32px 16px;
+  overflow-y: auto;
 }
 
 .title {
@@ -992,6 +995,7 @@ onMounted(async () => {
   padding: 14px 0 6px;
   position: sticky;
   bottom: 0;
+  z-index: 2;
   background: var(--surface-solid);
 }
 

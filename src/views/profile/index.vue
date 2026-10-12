@@ -1,15 +1,22 @@
 <template>
   <div class="profile-container fade-up">
     <section class="profile-card header-section">
-      <div class="avatar-wrapper">
+      <div class="avatar-wrapper" @click="triggerAvatarPick" v-loading="uploadingAvatar">
         <el-avatar
           :size="96"
-          :src="userStore.userInfo?.avatar || 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png'"
+          :src="avatarUrl"
         />
-        <div class="upload-overlay">
+        <div class="upload-overlay" title="更换头像">
           <el-icon><Camera /></el-icon>
         </div>
       </div>
+      <input
+        ref="avatarInput"
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp,image/bmp"
+        style="display: none"
+        @change="handleAvatarChange"
+      />
 
       <div class="user-info">
         <div class="name-row">
@@ -21,6 +28,19 @@
         <p class="user-meta">
           账号 ID: {{ profile.id || userStore.userInfo?.id }}
           <span v-if="profile.createdAt">· 注册于 {{ formatDate(profile.createdAt, 'date') }}</span>
+        </p>
+        <p class="avatar-tip">
+          点击头像上传新图片（jpg / png / gif / webp，不超过 5MB）
+          <el-button
+            v-if="hasCustomAvatar"
+            link
+            type="info"
+            size="small"
+            class="avatar-reset-btn"
+            @click="handleRemoveAvatar"
+          >
+            恢复默认头像
+          </el-button>
         </p>
       </div>
     </section>
@@ -287,11 +307,13 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Camera, CircleCheckFilled, Document, Lock, Medal, Operation, Top } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
+
+const DEFAULT_AVATAR = 'https://cube.elemecdn.com/0/88/03b0d39583f48206768a7534e55bcpng.png'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -301,6 +323,7 @@ const profile = ref({
   id: null,
   username: '',
   email: '',
+  avatar: '',
   role: 0,
   isAdmin: 0,
   levelName: '普通用户',
@@ -345,6 +368,75 @@ const bindingEmail = ref(false)
 const updatingPassword = ref(false)
 const resettingPassword = ref(false)
 const upgradingVip = ref(false)
+
+// ===== 头像 =====
+const avatarInput = ref(null)
+const uploadingAvatar = ref(false)
+const hasCustomAvatar = ref(false)
+
+/** 头像地址：优先用后端返回的带版本号地址，避免换头像后浏览器读到旧缓存 */
+const avatarUrl = computed(() => profile.value.avatar || userStore.userInfo?.avatar || DEFAULT_AVATAR)
+
+const triggerAvatarPick = () => {
+  if (uploadingAvatar.value) return
+  avatarInput.value?.click()
+}
+
+const handleAvatarChange = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+
+  if (!/^image\/(jpeg|jpg|png|gif|webp|bmp)$/.test(file.type)) {
+    ElMessage.warning('仅支持 jpg / png / gif / webp / bmp 格式的图片')
+    event.target.value = ''
+    return
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    ElMessage.warning('头像大小不能超过 5MB')
+    event.target.value = ''
+    return
+  }
+
+  uploadingAvatar.value = true
+  const formData = new FormData()
+  formData.append('file', file)
+
+  try {
+    const res = await request.post('/user/avatar', formData, { timeout: 0 })
+    const nextUrl = res.data?.avatar || ''
+    profile.value = { ...profile.value, avatar: nextUrl }
+    hasCustomAvatar.value = true
+    userStore.setUserInfo({ ...userStore.userInfo, avatar: nextUrl })
+    ElMessage.success('头像已更新')
+  } catch (error) {
+    /* 全局拦截器已提示错误 */
+  } finally {
+    uploadingAvatar.value = false
+    event.target.value = ''
+  }
+}
+
+const handleRemoveAvatar = async () => {
+  try {
+    await ElMessageBox.confirm('确定要恢复为默认头像吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch (e) {
+    return
+  }
+
+  try {
+    await request.delete('/user/avatar')
+    profile.value = { ...profile.value, avatar: '' }
+    hasCustomAvatar.value = false
+    userStore.setUserInfo({ ...userStore.userInfo, avatar: '' })
+    ElMessage.success('已恢复默认头像')
+  } catch (error) {
+    /* 全局拦截器已提示错误 */
+  }
+}
 
 const emailCountdown = ref(0)
 const forgotCountdown = ref(0)
@@ -415,6 +507,7 @@ const syncStoreUserInfo = () => {
     id: profile.value.id,
     username: profile.value.username,
     email: profile.value.email,
+    avatar: profile.value.avatar,
     role: profile.value.role,
     isAdmin: profile.value.isAdmin,
     levelName: profile.value.levelName,
@@ -440,6 +533,7 @@ const loadProfile = async () => {
     ...res.data
   }
   emailForm.email = profile.value.email || ''
+  hasCustomAvatar.value = Boolean(profile.value.avatar)
   syncStoreUserInfo()
 }
 
@@ -653,6 +747,16 @@ onBeforeUnmount(() => {
 .avatar-wrapper {
   position: relative;
   cursor: pointer;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.avatar-wrapper:hover {
+  transform: scale(1.04);
+}
+
+.avatar-wrapper:hover .upload-overlay {
+  transform: scale(1.12);
 }
 
 .upload-overlay {
@@ -668,6 +772,21 @@ onBeforeUnmount(() => {
   background: var(--accent);
   color: #fff;
   border: 3px solid var(--surface-solid);
+  transition: transform 0.2s ease;
+}
+
+.avatar-tip {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.avatar-reset-btn {
+  font-size: 12px;
 }
 
 .name-row {

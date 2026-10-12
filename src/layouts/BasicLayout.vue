@@ -133,8 +133,8 @@
         </div>
       </el-header>
 
-      <el-main class="page-main">
-        <div class="content-card">
+      <el-main class="page-main" :class="{ 'page-main--fixed': isFixedHeightPage }">
+        <div class="content-card" :class="{ 'content-card--fixed': isFixedHeightPage }">
           <router-view v-slot="{ Component }">
             <transition name="fade-transform" mode="out-in">
               <component :is="Component" />
@@ -185,6 +185,14 @@ const currentPageName = computed(() => {
   }
   return map[route.path] || '网盘'
 })
+
+/**
+ * 「整屏不滚动、内部区域独立滚动」的页面（文件页 / AI 助手）
+ * 这些页面自身的根节点用 height:100% + 内部滚动，
+ * 因此外层 main / card 必须交出高度链路，且不能自己滚动。
+ */
+const FIXED_HEIGHT_ROUTES = ['/app/disk', '/app/ai']
+const isFixedHeightPage = computed(() => FIXED_HEIGHT_ROUTES.includes(route.path))
 
 const storagePercentage = computed(() => {
   if (!storageInfo.value.totalSpace) {
@@ -519,6 +527,16 @@ watch(showNotificationPanel, (visible) => {
 .page-main {
   padding: 24px;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 外层交出滚动权，让页面内部区域自己滚（文件页 / AI 助手） */
+.page-main--fixed {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .content-card {
@@ -528,6 +546,24 @@ watch(showNotificationPanel, (visible) => {
   border-radius: 22px;
   padding: 24px;
   box-shadow: var(--shadow-soft);
+}
+
+.content-card--fixed {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* 固定高度页面里，路由根组件需要撑满卡片 */
+.content-card--fixed :deep(.dropbox-container) {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  border-radius: 22px;
+  overflow: hidden;
 }
 
 .fade-transform-enter-active,
