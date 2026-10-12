@@ -160,6 +160,9 @@ const loadContent = async () => {
     reason.value = data.reason || ''
     baseMd5.value = data.md5 || ''
     fileExt.value = data.ext || ''
+    // 关键：先关掉 loading 让 v-else 里的 editor-host 真正挂载，再创建 CodeMirror，
+    // 否则 editorHost 还是 null，编辑器根本不会创建（表现为打开后一片空白）
+    loading.value = false
     await nextTick()
     createEditor(data.content || '', editable.value, data.ext || '')
   } catch (e) {

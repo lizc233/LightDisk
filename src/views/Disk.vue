@@ -150,6 +150,7 @@
 
     <!-- 在线文本编辑器 -->
     <TextEditorDialog v-model="editorVisible" :file-id="editorFileId" @saved="loadFileList" />
+    <DocxPreviewDialog v-model="docxVisible" :file-id="docxFileId" :file-name="docxFileName" />
 
     <el-dialog
       v-model="shareDialogVisible"
@@ -254,6 +255,7 @@ import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import TextEditorDialog from '@/components/TextEditorDialog.vue'
+import DocxPreviewDialog from '@/components/DocxPreviewDialog.vue'
 import {
   ArrowRight,
   Clock,
@@ -475,9 +477,18 @@ const handleRowClick = async (row) => {
     return
   }
 
+  // docx → 前端 docx-preview 在线预览（浏览器原生渲染不了 OOXML）
+  const ext = (row.name || '').split('.').pop().toLowerCase()
+  if (ext === 'docx') {
+    docxFileId.value = row.id
+    docxFileName.value = row.name
+    docxVisible.value = true
+    return
+  }
+
   ElMessage.info('正在加载预览...')
   if (!isBrowserPreviewable(row)) {
-    ElMessage.warning('当前浏览器无法直接预览该 Office 文档，已切换为下载')
+    ElMessage.warning('当前浏览器无法直接预览该文档（旧版 .doc 需转存为 .docx），已切换为下载')
     handleDownload(row)
     return
   }
@@ -581,6 +592,11 @@ const resolveFileCategory = (row) => {
 // ===== 在线文本编辑器 =====
 const editorVisible = ref(false)
 const editorFileId = ref(null)
+
+// ===== Word 预览 =====
+const docxVisible = ref(false)
+const docxFileId = ref(null)
+const docxFileName = ref('')
 const TEXT_EDITABLE_EXTS = ['txt', 'md', 'json', 'csv', 'log', 'xml', 'yml', 'yaml', 'ini', 'conf', 'properties', 'html', 'css', 'js', 'sql', 'bat', 'sh']
 
 const isTextEditable = (row) => {
