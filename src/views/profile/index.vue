@@ -65,6 +65,47 @@
             </el-button>
           </div>
         </div>
+
+        <!-- 分类占用：按文件类型展示真实字节数 -->
+        <div v-if="storageStats" class="category-usage">
+          <div v-for="cat in categoryUsage" :key="cat.key" class="cat-row">
+            <span class="cat-label">{{ cat.label }}</span>
+            <div class="cat-bar">
+              <div class="cat-bar-fill" :style="{ width: cat.percent + '%', background: cat.color }"></div>
+            </div>
+            <span class="cat-value">{{ cat.text }}</span>
+          </div>
+        </div>
+
+        <!-- 概览数字：文件/文件夹/分享/近 7 天上传 -->
+        <div v-if="storageStats" class="stats-grid">
+          <div class="stat-cell">
+            <span class="stat-num">{{ storageStats.fileCount || 0 }}</span>
+            <span class="stat-label">文件</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-num">{{ storageStats.folderCount || 0 }}</span>
+            <span class="stat-label">文件夹</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-num">{{ storageStats.shareCount || 0 }}</span>
+            <span class="stat-label">有效分享</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-num">{{ storageStats.recentUploads || 0 }}</span>
+            <span class="stat-label">近 7 天上传</span>
+          </div>
+        </div>
+
+        <div v-if="storageStats && storageStats.biggestFileName" class="biggest-file">
+          <el-icon><Document /></el-icon>
+          <span class="bf-label">最大文件</span>
+          <span class="bf-name" :title="storageStats.biggestFileName">{{ storageStats.biggestFileName }}</span>
+          <span class="bf-size">{{ formatBytes(storageStats.biggestFileSize) }}</span>
+          <span v-if="storageStats.lastUploadTime" class="bf-time">
+            最近上传：{{ formatDate(storageStats.lastUploadTime) }}
+          </span>
+        </div>
       </section>
 
       <div class="settings-grid">
@@ -247,7 +288,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Camera, CircleCheckFilled, Lock, Medal, Operation, Top } from '@element-plus/icons-vue'
+import { Camera, CircleCheckFilled, Document, Lock, Medal, Operation, Top } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -339,6 +380,34 @@ const storageColor = computed(() => {
 const formattedUsed = computed(() => formatBytes(profile.value.usedSpace))
 const formattedTotal = computed(() => formatBytes(profile.value.totalSpace))
 const formattedFree = computed(() => formatBytes(profile.value.availableSpace))
+
+// ==================== 存储分析统计 ====================
+const storageStats = ref(null)
+
+const categoryUsage = computed(() => {
+  const bytes = storageStats.value?.categoryBytes || {}
+  const used = profile.value.usedSpace || 1
+  const items = [
+    { key: 'image', label: '图片', value: bytes.image || 0, color: 'var(--accent)' },
+    { key: 'doc', label: '文档', value: bytes.doc || 0, color: '#3b82f6' },
+    { key: 'video', label: '视频', value: bytes.video || 0, color: '#f59e0b' },
+    { key: 'other', label: '其他', value: bytes.other || 0, color: '#94a3b8' }
+  ]
+  return items.map(item => ({
+    ...item,
+    text: item.value >= 1 ? `${formatBytes(item.value)}` : '0 B',
+    percent: Math.max((item.value / used) * 100, item.value > 0 ? 3 : 0)
+  }))
+})
+
+const loadStorageStats = async () => {
+  try {
+    const res = await request.get('/file/storage/stats')
+    storageStats.value = res.data || null
+  } catch (e) {
+    /* 统计失败不影响主信息展示 */
+  }
+}
 
 const syncStoreUserInfo = () => {
   userStore.setUserInfo({
@@ -548,6 +617,7 @@ const formatDate = (value, mode = 'datetime') => {
 
 onMounted(() => {
   loadProfile()
+  loadStorageStats()
 })
 
 onBeforeUnmount(() => {
@@ -686,6 +756,118 @@ onBeforeUnmount(() => {
 
 .upgrade-btn {
   margin-top: 10px;
+}
+
+/* ===== 分类占用条 ===== */
+.category-usage {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.cat-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 76px;
+  align-items: center;
+  gap: 10px;
+}
+
+.cat-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.cat-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.cat-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cat-value {
+  font-size: 12px;
+  color: var(--text-primary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== 概览数字格 ===== */
+.stats-grid {
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.stat-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 4px;
+  border-radius: 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-color);
+}
+
+.stat-num {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ===== 最大文件 / 最近上传 ===== */
+.biggest-file {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.biggest-file .el-icon {
+  color: var(--text-muted);
+}
+
+.bf-label {
+  flex-shrink: 0;
+}
+
+.bf-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.bf-size {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.bf-time {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-muted);
 }
 
 .settings-grid {
@@ -845,6 +1027,14 @@ onBeforeUnmount(() => {
 
   .storage-content {
     flex-direction: column;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .bf-time {
+    display: none;
   }
 
   .dialog-footer-row,

@@ -1,5 +1,7 @@
 <template>
   <div class="recycle-container">
+    <PageHeader eyebrow="Recycle Bin" title="回收站" sub="删除的文件保留 30 天，过期自动清除；也可在这里还原或彻底删除。" />
+
     <div class="toolbar">
       <div class="toolbar-left">
         <el-input
@@ -32,10 +34,10 @@
 
       <div class="toolbar-right">
         <el-radio-group v-model="viewMode">
-          <el-radio-button label="table">
+          <el-radio-button value="table">
             <el-icon><Menu /></el-icon>
           </el-radio-button>
-          <el-radio-button label="grid">
+          <el-radio-button value="grid">
             <el-icon><Grid /></el-icon>
           </el-radio-button>
         </el-radio-group>
@@ -141,6 +143,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Document, Folder, Grid, Menu, RefreshLeft, Search } from '@element-plus/icons-vue'
 import request from '@/utils/request'
+import PageHeader from '@/components/PageHeader.vue'
 
 const loading = ref(false)
 const searchKeyword = ref('')
@@ -291,7 +294,7 @@ onMounted(() => {
 
 <style scoped>
 .recycle-container {
-  padding: 20px;
+  padding: 28px 40px;
   background: var(--surface-solid);
   min-height: calc(100vh - 40px);
 }

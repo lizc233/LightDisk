@@ -1,14 +1,14 @@
 <template>
   <div class="messages-page">
-    <header class="page-head">
-      <div>
-        <p class="eyebrow">Messages</p>
-        <h1>私信中心</h1>
-        <p class="sub">站内私信按「邮件」语义：知道对方 ID 或用户名即可发送，无需对方同意。</p>
-      </div>
-      <el-button v-if="isAdminUser" type="warning" :icon="Bell" @click="noticeVisible = true">发通知</el-button>
-      <el-button type="primary" :icon="Promotion" @click="openWrite()">写私信</el-button>
-    </header>
+    <PageHeader eyebrow="Messages" title="私信中心">
+      <template #sub>
+        站内私信按「邮件」语义：知道对方 ID 或用户名即可发送，无需对方同意。
+      </template>
+      <template #actions>
+        <el-button v-if="isAdminUser" type="warning" :icon="Bell" @click="noticeVisible = true">发通知</el-button>
+        <el-button type="primary" :icon="Promotion" @click="openWrite()">写私信</el-button>
+      </template>
+    </PageHeader>
 
     <el-tabs v-model="activeTab" class="main-tabs" v-show="!detailMsg">
       <!-- ==================== 收件箱 ==================== -->
@@ -292,6 +292,7 @@ import { deleteMessage, getNotificationList, getMessageList, markAnnouncementRea
 import { formatRelativeTime } from '@/utils/datetime'
 import WriteMessageDialog from '@/components/WriteMessageDialog.vue'
 import SendNoticeDialog from '@/components/SendNoticeDialog.vue'
+import PageHeader from '@/components/PageHeader.vue'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()

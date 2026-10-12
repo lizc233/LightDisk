@@ -1,21 +1,14 @@
 <template>
   <div class="ai-page">
-    <section class="hero-card">
-      <div>
-        <p class="eyebrow">LightDisk Intelligent Workspace</p>
-        <h1>LightDisk AI 助手</h1>
-        <p class="hero-desc">
-          面向文件检索与知识问答场景，支持 Query 改写、多路召回、结果重排、来源回显和上下文辅助分析。
-        </p>
-      </div>
-      <div class="hero-actions">
-        <el-tag :type="aiStatus.online ? 'success' : 'info'" effect="plain">
+    <PageHeader eyebrow="LightDisk AI" title="AI 助手">
+      <template #badge>
+        <el-tag :type="aiStatus.online ? 'success' : 'info'" effect="plain" size="small" round>
           {{ aiStatus.online ? `在线 · ${aiStatus.model}` : '离线规则引擎' }}
         </el-tag>
-        <el-tag effect="plain">当前身份：{{ aiStatus.userLevelName || '普通用户' }}</el-tag>
-        <el-tag type="warning" effect="plain">提问 → 意图理解 → 工具 → 复核</el-tag>
-      </div>
-    </section>
+        <el-tag effect="plain" size="small" round>{{ aiStatus.userLevelName || '普通用户' }}</el-tag>
+      </template>
+      <template #sub>文件定位 · 内容总结 · 文件改写 · 知识问答；回答基于工具检索结果生成，经复核 Agent 校验。</template>
+    </PageHeader>
 
     <div class="ai-layout">
       <section class="chat-card">
@@ -73,17 +66,55 @@
             </el-button>
           </div>
 
+          <!-- 已点选的云盘文件（作为回答上下文） -->
+          <div v-if="pickedFile" class="picked-file-chip">
+            <el-icon><Document /></el-icon>
+            <span class="chip-name">{{ pickedFile.name }}</span>
+            <el-icon class="chip-close" @click="clearPickedFile"><CircleCloseFilled /></el-icon>
+          </div>
+
           <div class="composer-box">
+            <el-popover v-model:visible="pickerVisible" placement="top-start" :width="380" trigger="click">
+              <template #reference>
+                <button class="attach-btn" title="选择云盘文件作为分析对象">
+                  <el-icon><Plus /></el-icon>
+                </button>
+              </template>
+              <div class="file-picker">
+                <el-input
+                  v-model="pickerKeyword"
+                  size="small"
+                  placeholder="搜索我的文件..."
+                  :prefix-icon="Search"
+                  clearable
+                />
+                <div v-loading="pickerLoading" class="picker-list">
+                  <button
+                    v-for="file in pickerFiles"
+                    :key="file.fileId"
+                    class="picker-item"
+                    @click="pickFile(file)"
+                  >
+                    <el-icon><Document /></el-icon>
+                    <span class="picker-name">{{ file.name }}</span>
+                    <span class="picker-meta">{{ file.sizeText }}</span>
+                  </button>
+                  <div v-if="!pickerLoading && !pickerFiles.length" class="picker-empty">
+                    没有匹配的文件
+                  </div>
+                </div>
+              </div>
+            </el-popover>
             <el-input
               v-model="inputText"
               type="textarea"
               resize="none"
               :rows="1"
               :autosize="{ minRows: 1, maxRows: 4 }"
-              placeholder="例如：帮我找实训报告、回收站里哪些快过期、为什么 RAG 要做 Query 改写"
+              :placeholder="pickedFile ? `和 AI 聊聊「${pickedFile.name}」，如：总结这个文件 / 把开头改成...` : '例如：帮我找实训报告、回收站里哪些快过期、为什么 RAG 要做 Query 改写'"
               @keydown.enter.prevent="sendMessage"
             />
-            <el-button type="primary" class="send-btn" :disabled="!inputText.trim() || isThinking" @click="sendMessage">
+            <el-button type="primary" class="send-btn" :disabled="!canSend" @click="sendMessage">
               发送
             </el-button>
           </div>
@@ -150,11 +181,12 @@
 </template>
 
 <script setup>
-import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
+import { nextTick, onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { MagicStick, User } from '@element-plus/icons-vue'
+import { CircleCloseFilled, Document, MagicStick, Plus, Search, User } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
+import PageHeader from '@/components/PageHeader.vue'
 
 const userStore = useUserStore()
 const chatWindow = ref(null)
@@ -206,6 +238,74 @@ const insertPrompt = (prompt) => {
   inputText.value = prompt
 }
 
+// ==================== 云盘文件选择器 ====================
+const pickerVisible = ref(false)
+const pickerKeyword = ref('')
+const pickerLoading = ref(false)
+const pickerFiles = ref([])
+const pickedFile = ref(null)
+let pickerTimer = null
+
+const searchMyFiles = async () => {
+  pickerLoading.value = true
+  try {
+    const res = await request.post('/file/list', {
+      folderId: 0,
+      pageNum: 1,
+      pageSize: 20,
+      category: 'all',
+      isRecent: true
+    })
+    const records = res.data?.records || []
+    const keyword = pickerKeyword.value.trim().toLowerCase()
+    const rows = records
+      .filter(item => item.type !== 'folder')
+      .map(item => ({
+        fileId: item.id,
+        name: item.name,
+        sizeText: item.size != null ? formatSizeShort(item.size) : ''
+      }))
+    pickerFiles.value = keyword
+      ? rows.filter(f => f.name.toLowerCase().includes(keyword))
+      : rows
+  } catch (e) {
+    pickerFiles.value = []
+  } finally {
+    pickerLoading.value = false
+  }
+}
+
+const formatSizeShort = (bytes) => {
+  const size = Number(bytes || 0)
+  if (size >= 1024 ** 3) return `${(size / 1024 ** 3).toFixed(2)} GB`
+  if (size >= 1024 ** 2) return `${(size / 1024 ** 2).toFixed(1)} MB`
+  if (size >= 1024) return `${(size / 1024).toFixed(0)} KB`
+  return `${size} B`
+}
+
+watch(pickerKeyword, () => {
+  clearTimeout(pickerTimer)
+  pickerTimer = setTimeout(searchMyFiles, 250)
+})
+
+watch(pickerVisible, (visible) => {
+  if (visible) {
+    searchMyFiles()
+  }
+})
+
+const pickFile = (file) => {
+  pickedFile.value = file
+  pickerVisible.value = false
+  pickerKeyword.value = ''
+}
+
+const clearPickedFile = () => {
+  pickedFile.value = null
+}
+
+const canSend = computed(() => (inputText.value.trim() || pickedFile.value) && !isThinking.value)
+
 const scrollToBottom = async () => {
   await nextTick()
   if (chatWindow.value) {
@@ -232,13 +332,19 @@ const stopThinkingAnimation = () => {
 
 const sendMessage = async () => {
   const query = inputText.value.trim()
-  if (!query || isThinking.value) {
+  if ((!query && !pickedFile.value) || isThinking.value) {
     return
   }
 
+  // 只点了文件没打字：给一句默认指令，后端会以该文件为分析对象
+  const finalQuery = query || '帮我总结一下这个文件的内容'
+  const displayQuery = query || `分析文件「${pickedFile.value.name}」`
+
   messageList.value.push({
     role: 'user',
-    content: query
+    content: pickedFile.value
+      ? `<span class="msg-file-tag">📎 ${pickedFile.value.name}</span>${query}`
+      : displayQuery
   })
   inputText.value = ''
   isThinking.value = true
@@ -246,7 +352,11 @@ const sendMessage = async () => {
   await scrollToBottom()
 
   try {
-    const res = await request.post('/ai/chat', { query, topK: 5 })
+    const res = await request.post('/ai/chat', {
+      query: finalQuery,
+      topK: 5,
+      fileId: pickedFile.value ? pickedFile.value.fileId : null
+    })
     const data = res.data || {}
 
     messageList.value.push({
@@ -267,6 +377,7 @@ const sendMessage = async () => {
     stopThinkingAnimation()
     isThinking.value = false
     thinkingStatus.value = 'AI thinking...'
+    pickedFile.value = null
     await scrollToBottom()
   }
 }
@@ -343,48 +454,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.hero-card {
-  display: flex;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 20px 24px;
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at top right, rgba(34, 197, 94, 0.18), transparent 32%),
-    linear-gradient(135deg, var(--surface-strong), var(--surface-solid) 52%, var(--surface-muted));
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-soft);
-}
-
-.eyebrow {
-  margin: 0 0 6px;
-  font-size: 12px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-.hero-card h1 {
-  margin: 0;
-  font-size: clamp(2rem, 4vw, 2.7rem);
-}
-
-.hero-desc {
-  max-width: 760px;
-  margin: 8px 0 0;
-  line-height: 1.6;
-  color: var(--text-secondary);
-}
-
-.hero-actions {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding-top: 2px;
-}
-
 .ai-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.8fr);
@@ -398,9 +467,8 @@ onBeforeUnmount(() => {
 .panel-card {
   background: var(--surface-solid);
   border: 1px solid var(--border-color);
-  border-radius: 24px;
+  border-radius: 16px;
   box-shadow: var(--shadow-soft);
-  backdrop-filter: blur(14px);
 }
 
 .chat-card {
@@ -549,9 +617,129 @@ onBeforeUnmount(() => {
 
 .composer-box {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: end;
+}
+
+/* 左侧「+」附件按钮 */
+.attach-btn {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.attach-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* 已点选的文件 chip */
+.picked-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 500;
+  width: fit-content;
+}
+
+.chip-name {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-close {
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.chip-close:hover {
+  opacity: 1;
+}
+
+/* 用户消息里的文件标记 */
+.msg-file-tag {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 12px;
+}
+
+/* 文件选择弹层 */
+.file-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.picker-list {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 60px;
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+
+.picker-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.picker-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.picker-empty {
+  padding: 18px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .send-btn {
@@ -657,21 +845,16 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 760px) {
-  .hero-card {
-    flex-direction: column;
-    padding: 18px;
-  }
-
   .chat-card {
     min-height: 620px;
   }
 
   .composer-box {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto 1fr;
   }
 
   .send-btn {
-    width: 100%;
+    display: none;
   }
 
   .message-row {

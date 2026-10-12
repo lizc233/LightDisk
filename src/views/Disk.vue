@@ -137,7 +137,7 @@
           <el-pagination
             v-model:current-page="currentPage"
             v-model:page-size="pageSize"
-            :page-sizes="[20, 50, 100]"
+            :page-sizes="[10, 20, 50]"
             :background="true"
             layout="total, sizes, prev, pager, next, jumper"
             :total="total"
@@ -288,7 +288,7 @@ const allFolders = ref([])
 const currentFolderId = ref(0)
 
 const currentPage = ref(1)
-const pageSize = ref(50)
+const pageSize = ref(20)
 const total = ref(0)
 const currentCategory = ref('all')
 const isRecentMode = ref(false)
@@ -798,12 +798,17 @@ onMounted(async () => {
 
 .main-content {
   flex: 1;
-  padding: 32px 48px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 36px 16px;
+  overflow: hidden;
+  min-height: 0;
 }
 
+/* 面包屑 / 搜索 / 上传按钮固定不动，只有文件列表区域滚动 */
 .content-header {
-  margin-bottom: 32px;
+  margin-bottom: 20px;
+  flex-shrink: 0;
 }
 
 .breadcrumb-wrap {
@@ -857,7 +862,8 @@ onMounted(async () => {
 .action-grid {
   display: flex;
   gap: 16px;
-  margin-bottom: 40px;
+  margin-bottom: 24px;
+  flex-shrink: 0;
 }
 
 .action-tile {
@@ -881,6 +887,16 @@ onMounted(async () => {
 .action-tile:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.file-list-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: var(--surface-solid);
+  padding: 4px 18px 12px;
 }
 
 .file-info-cell {
@@ -973,8 +989,10 @@ onMounted(async () => {
 .pagination-container {
   display: flex;
   justify-content: flex-end;
-  padding: 24px 0 10px;
-  margin-top: 10px;
+  padding: 14px 0 6px;
+  position: sticky;
+  bottom: 0;
+  background: var(--surface-solid);
 }
 
 .extract-code-line {

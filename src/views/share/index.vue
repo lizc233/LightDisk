@@ -1,16 +1,15 @@
 <template>
   <div class="share-container">
-    <header class="content-header">
-      <div class="header-left">
-        <h2 class="title">我的分享</h2>
-        <span class="stat-badge">有效分享：{{ validShareCount }} 个</span>
-      </div>
-      <div class="header-right">
+    <PageHeader eyebrow="Shares" title="我的分享" sub="这里管理你创建的所有分享链接，可随时复制或取消。">
+      <template #badge>
+        <el-tag effect="plain" size="small" round type="success">有效 {{ validShareCount }} 个</el-tag>
+      </template>
+      <template #actions>
         <el-button plain class="custom-btn" @click="clearExpired">
-          <el-icon><Delete /></el-icon> 一键清理已失效
+          <el-icon><Delete /></el-icon> 清理已失效
         </el-button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <transition name="slide-down">
       <div v-if="selectedRows.length > 0" class="batch-action-bar">
@@ -106,6 +105,7 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Document, VideoCamera, Picture, CopyDocument, CircleClose, Delete } from '@element-plus/icons-vue'
 import request from '@/utils/request' // 已解除注释，引入封装好的 axios
+import PageHeader from '@/components/PageHeader.vue'
 
 const tableRef = ref(null)
 const tableData = ref([])
@@ -267,35 +267,11 @@ onMounted(() => {
   flex-direction: column;
   height: 100%;
   background: var(--surface-solid);
-  padding: 32px 48px;
+  padding: 28px 40px;
+  overflow-y: auto;
 }
 
-/* 头部样式 */
-.content-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.title {
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin: 0;
-}
-.stat-badge {
-  background: var(--surface-strong);
-  color: var(--accent);
-  padding: 4px 12px;
-  border-radius: 14px;
-  font-size: 13px;
-  font-weight: 500;
-}
+/* 旧头部样式已由统一 PageHeader 组件取代 */
 .custom-btn {
   border-radius: 8px;
 }
