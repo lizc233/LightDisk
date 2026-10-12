@@ -62,8 +62,8 @@
         <span v-else class="clean-flag">已与服务器同步</span>
         <span class="meta-right">
           <el-radio-group v-if="isCsv" v-model="csvView" size="small" style="margin-right: 14px">
-            <el-radio-button label="table">表格</el-radio-button>
-            <el-radio-button label="source">源码</el-radio-button>
+            <el-radio-button value="table">表格</el-radio-button>
+            <el-radio-button value="source">源码</el-radio-button>
           </el-radio-group>
           <el-switch
             v-if="isMarkdown"
