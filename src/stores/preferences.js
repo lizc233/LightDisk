@@ -17,13 +17,16 @@ export const usePreferencesStore = defineStore('preferences', () => {
 
   const theme = ref(saved.theme === 'dark' ? 'dark' : 'light')
   const enableChunkUpload = ref(saved.enableChunkUpload !== false)
+  // 下载前是否弹确认框（默认开启，避免"点一下文件就静默下载"）
+  const confirmBeforeDownload = ref(saved.confirmBeforeDownload !== false)
 
   const isDark = computed(() => theme.value === 'dark')
 
   const persist = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       theme: theme.value,
-      enableChunkUpload: enableChunkUpload.value
+      enableChunkUpload: enableChunkUpload.value,
+      confirmBeforeDownload: confirmBeforeDownload.value
     }))
   }
 
@@ -46,7 +49,11 @@ export const usePreferencesStore = defineStore('preferences', () => {
     enableChunkUpload.value = !!enabled
   }
 
-  watch([theme, enableChunkUpload], () => {
+  const setConfirmBeforeDownload = (enabled) => {
+    confirmBeforeDownload.value = !!enabled
+  }
+
+  watch([theme, enableChunkUpload, confirmBeforeDownload], () => {
     applyTheme()
     persist()
   })
@@ -55,8 +62,10 @@ export const usePreferencesStore = defineStore('preferences', () => {
     theme,
     isDark,
     enableChunkUpload,
+    confirmBeforeDownload,
     initialize,
     setTheme,
-    setEnableChunkUpload
+    setEnableChunkUpload,
+    setConfirmBeforeDownload
   }
 })

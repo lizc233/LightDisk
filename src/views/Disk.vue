@@ -203,7 +203,7 @@
           <el-table-column label="" width="320" align="right">
             <template #default="{ row }">
               <div class="premium-actions">
-                <button class="action-btn" @click.stop="handleDownload(row)">
+                <button class="action-btn" @click.stop="requestDownload(row, 'button')">
                   <el-icon><Download /></el-icon>
                   <span>下载</span>
                 </button>
@@ -448,6 +448,54 @@
       </template>
     </el-dialog>
 
+    <!-- 下载确认：点击文件行不再直接下载，先让用户确认 -->
+    <el-dialog
+      v-model="downloadConfirmVisible"
+      title="下载确认"
+      width="440px"
+      destroy-on-close
+      class="download-confirm-dialog"
+    >
+      <div class="download-confirm-body">
+        <div class="download-file-card">
+          <span class="download-file-icon">
+            <el-icon :size="26" :color="getIconColor(downloadTarget || {})">
+              <component :is="getIconComponent(downloadTarget || {})" />
+            </el-icon>
+          </span>
+          <div class="download-file-meta">
+            <div class="download-file-name" :title="downloadTarget?.name">{{ downloadTarget?.name }}</div>
+            <div class="download-file-sub">
+              <span>{{ formatBytes(downloadTarget?.size) }}</span>
+              <span v-if="downloadExtText">·</span>
+              <span v-if="downloadExtText">{{ downloadExtText }}</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="download-tip">{{ downloadTipText }}</p>
+
+        <el-checkbox v-model="downloadNoAskAgain" class="download-noask">
+          以后点击文件直接下载，不再询问
+        </el-checkbox>
+      </div>
+
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="downloadConfirmVisible = false">取消</el-button>
+          <el-button
+            v-if="downloadCanPreview"
+            text
+            type="primary"
+            @click="previewInsteadOfDownload"
+          >
+            改为在线预览
+          </el-button>
+          <el-button type="primary" @click="confirmDownload">确认下载</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- 全屏图片画廊 -->
     <ImageGallery
       v-model="galleryVisible"
@@ -501,9 +549,11 @@ import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { usePreferencesStore } from '@/stores/preferences'
 import TextEditorDialog from '@/components/TextEditorDialog.vue'
 import OfficePreviewDialog from '@/components/OfficePreviewDialog.vue'
 import ImageGallery from '@/components/ImageGallery.vue'
+import { formatBytes, fileExt } from '@/utils/format'
 import {
   ArrowRight,
   Clock,
@@ -532,6 +582,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const preferencesStore = usePreferencesStore()
 
 const searchQuery = ref('')
 const tableData = ref([])
@@ -835,6 +886,17 @@ const submitBatchDownload = async () => {
     ElMessage.warning('请先勾选要下载的文件')
     return
   }
+  if (preferencesStore.confirmBeforeDownload) {
+    try {
+      await ElMessageBox.confirm(
+        `即将把选中的 ${selected.value.length} 项打包为 zip 下载，是否继续？`,
+        '下载确认',
+        { confirmButtonText: '确认下载', cancelButtonText: '取消', type: 'info' }
+      )
+    } catch (e) {
+      return
+    }
+  }
   batchDownloading.value = true
   try {
     const blob = await request.post('/file/batch-download', {
@@ -1118,7 +1180,7 @@ const handleRowClick = async (row) => {
 
   const action = resolveOpenAction(row)
   if (action === 'download') {
-    handleDownload(row)
+    requestDownload(row, 'row')
     return
   }
 
@@ -1135,7 +1197,7 @@ const handleRowClick = async (row) => {
   ElMessage.info('正在加载预览...')
   if (!isBrowserPreviewable(row)) {
     ElMessage.warning('当前浏览器无法直接预览该文档，已切换为下载')
-    handleDownload(row)
+    requestDownload(row, 'unpreviewable')
     return
   }
 
@@ -1150,6 +1212,75 @@ const handleDownload = (row) => {
   }
   const token = getToken()
   window.open(`/api/file/download/${row.id}?token=${token}`, '_self')
+}
+
+// ===== 下载确认窗口 =====
+// 场景：点击文件行 / 点下载按钮 / 无法在线预览回退时，都不再静默下载，
+// 先弹窗告知将要下载的文件并让用户确认；用户勾选「不再询问」后走直连下载。
+const downloadConfirmVisible = ref(false)
+const downloadTarget = ref(null)
+const downloadReason = ref('row')       // row | button | unpreviewable
+const downloadNoAskAgain = ref(false)
+
+const downloadExtText = computed(() => {
+  const row = downloadTarget.value
+  if (!row) return ''
+  const ext = (row.ext || fileExt(row.name) || '').toUpperCase()
+  return ext ? `${ext} 文件` : '未知类型'
+})
+
+const downloadTipText = computed(() => {
+  const name = downloadTarget.value?.name || '该文件'
+  if (downloadReason.value === 'unpreviewable') {
+    return `[${name}] 无法在当前浏览器中在线预览，是否下载到本地查看？`
+  }
+  if (downloadReason.value === 'row') {
+    return `即将开始下载 [${name}]。若不是你想打开的文件，可以取消。`
+  }
+  return `即将开始下载 [${name}]。`
+})
+
+const downloadCanPreview = computed(() => {
+  const row = downloadTarget.value
+  return !!row && isBrowserPreviewable(row)
+})
+
+/** 统一的下载入口：按用户偏好决定是直接下载还是先弹确认 */
+const requestDownload = (row, reason = 'row') => {
+  if (!row || row.isFolder) {
+    ElMessage.warning('文件夹暂不支持直接下载')
+    return
+  }
+  if (!preferencesStore.confirmBeforeDownload) {
+    handleDownload(row)
+    return
+  }
+  downloadTarget.value = row
+  downloadReason.value = reason
+  downloadNoAskAgain.value = false
+  downloadConfirmVisible.value = true
+}
+
+const confirmDownload = () => {
+  const row = downloadTarget.value
+  if (downloadNoAskAgain.value) {
+    preferencesStore.setConfirmBeforeDownload(false)
+    ElMessage.info('已关闭下载询问，可在「设置 → 文件打开偏好」中重新开启')
+  }
+  downloadConfirmVisible.value = false
+  if (row) handleDownload(row)
+}
+
+const previewInsteadOfDownload = () => {
+  const row = downloadTarget.value
+  downloadConfirmVisible.value = false
+  if (!row) return
+  if (isImageFile(row)) {
+    openGallery(row)
+    return
+  }
+  const token = getToken()
+  window.open(`/api/file/preview/${row.id}?token=${token}`, '_blank')
 }
 
 const handleDelete = (row) => {
@@ -2119,6 +2250,66 @@ onMounted(async () => {
   text-align: center;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+/* 下载确认弹窗 */
+.download-confirm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.download-file-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: var(--surface-muted);
+}
+
+.download-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--surface-solid);
+}
+
+.download-file-meta {
+  min-width: 0;
+}
+
+.download-file-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-file-sub {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.download-tip {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.download-noask {
+  align-self: flex-start;
 }
 
 /* 批量分享结果 */

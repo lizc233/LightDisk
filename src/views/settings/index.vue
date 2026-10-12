@@ -115,7 +115,7 @@
 
       <section class="settings-card full">
         <h3>文件打开偏好</h3>
-        <p class="card-desc">点击文件行时会按这里的规则决定是预览还是直接下载，下载按钮本身仍然保持下载行为。</p>
+        <p class="card-desc">点击文件行时会按这里的规则决定是预览还是直接下载；开启「下载前询问」后，任何下载都会先弹出确认窗口，不会静默下载。</p>
 
         <div class="open-grid">
           <div class="open-item">
@@ -135,6 +135,14 @@
             <el-segmented v-model="settings.otherOpenAction" :options="openActionOptions" />
           </div>
         </div>
+
+        <div class="setting-line download-ask-line">
+          <div>
+            <strong>下载前询问</strong>
+            <p>开启后，点击文件或点「下载」都会先弹确认窗口；关闭则直接下载。</p>
+          </div>
+          <el-switch v-model="confirmBeforeDownload" />
+        </div>
       </section>
 
     </div>
@@ -147,7 +155,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -157,6 +165,12 @@ const preferencesStore = usePreferencesStore()
 const userStore = useUserStore()
 
 const saving = ref(false)
+
+// 纯前端偏好（存 localStorage），切换即时生效，不需要点保存
+const confirmBeforeDownload = computed({
+  get: () => preferencesStore.confirmBeforeDownload,
+  set: (value) => preferencesStore.setConfirmBeforeDownload(value)
+})
 const settings = reactive({
   defaultShareExpireDays: 15,
   recycleReminderEnabled: true,
@@ -410,6 +424,12 @@ onMounted(() => {
   display: block;
   margin-bottom: 12px;
   color: var(--text-primary);
+}
+
+.download-ask-line {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--border-color);
 }
 
 .footer-actions {
