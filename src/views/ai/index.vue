@@ -1,23 +1,20 @@
 <template>
   <div class="ai-page">
-    <PageHeader eyebrow="LightDisk AI" title="AI 助手">
-      <template #badge>
-        <el-tag :type="aiStatus.online ? 'success' : 'info'" effect="plain" size="small" round>
-          {{ aiStatus.online ? `在线 · ${aiStatus.model}` : '离线规则引擎' }}
-        </el-tag>
-        <el-tag effect="plain" size="small" round>{{ aiStatus.userLevelName || '普通用户' }}</el-tag>
-      </template>
-      <template #sub>文件定位 · 内容总结 · 文件改写 · 知识问答；回答基于工具检索结果生成，经复核 Agent 校验。</template>
-    </PageHeader>
-
     <div class="ai-layout">
       <section class="chat-card">
         <div class="chat-head">
-          <div>
-            <h2>对话窗口</h2>
-            <p>支持文件定位、回收站提醒、分享检索和 RAG/Agent 面试问答。</p>
+          <div class="chat-head-main">
+            <p class="chat-eyebrow">LIGHTDISK AI</p>
+            <div class="chat-title-row">
+              <h2 class="chat-title">AI 助手</h2>
+              <el-tag :type="aiStatus.online ? 'success' : 'info'" effect="plain" size="small" round>
+                {{ aiStatus.online ? `在线 · ${aiStatus.model}` : '离线规则引擎' }}
+              </el-tag>
+              <el-tag effect="plain" size="small" round>{{ aiStatus.userLevelName || '普通用户' }}</el-tag>
+            </div>
+            <p class="chat-sub">文件定位 · 内容总结 · 文件改写 · 知识问答，回答经复核 Agent 校验。</p>
           </div>
-          <el-button text @click="resetConversation">清空对话</el-button>
+          <el-button text size="small" @click="resetConversation">清空对话</el-button>
         </div>
 
         <div ref="chatWindow" class="chat-window">
@@ -122,6 +119,10 @@
       </section>
 
       <aside class="side-panel">
+        <section class="panel-card pet-card">
+          <CloudPet />
+        </section>
+
         <section class="panel-card">
           <div class="panel-title-row">
             <h3>执行轨迹</h3>
@@ -153,25 +154,13 @@
           </div>
         </section>
 
-        <section class="panel-card">
+        <section v-if="currentSources.length" class="panel-card">
           <h3>来源回显</h3>
-          <div v-if="currentSources.length" class="source-list">
+          <div class="source-list">
             <div v-for="source in currentSources" :key="`${source.sourceType}-${source.sourceId}`" class="source-item">
               <div class="source-title">{{ source.title }}</div>
               <div class="source-path">{{ source.path }}</div>
               <div class="source-summary">{{ source.summary }}</div>
-            </div>
-          </div>
-          <div v-else class="empty-tip">当前回答没有数据库来源，通常是知识卡或降级回答。</div>
-        </section>
-
-        <section class="panel-card">
-          <h3>能力标签</h3>
-          <div class="capability-list">
-            <div v-for="card in capabilityCards" :key="card.title" class="capability-item">
-              <div class="capability-title">{{ card.title }}</div>
-              <div class="capability-summary">{{ card.summary }}</div>
-              <div class="capability-detail">{{ card.detail }}</div>
             </div>
           </div>
         </section>
@@ -186,7 +175,7 @@ import { ElMessage } from 'element-plus'
 import { CircleCloseFilled, Document, MagicStick, Plus, Search, User } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
-import PageHeader from '@/components/PageHeader.vue'
+import CloudPet from '@/components/CloudPet.vue'
 
 const userStore = useUserStore()
 const chatWindow = ref(null)
@@ -447,8 +436,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 1320px;
-  margin: 0 auto;
   height: calc(100vh - 154px);
   min-height: 0;
   overflow: hidden;
@@ -456,8 +443,8 @@ onBeforeUnmount(() => {
 
 .ai-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.8fr);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 288px;
+  gap: 16px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -484,21 +471,54 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 20px 14px;
+  padding: 14px 20px 12px;
   border-bottom: 1px solid var(--border-color);
 }
 
-.chat-head h2,
-.panel-card h3 {
+.chat-head-main {
+  min-width: 0;
+}
+
+.chat-eyebrow {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chat-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.chat-title {
   margin: 0;
   font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.chat-sub {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.panel-card h3 {
+  margin: 0;
+  font-size: 16px;
   color: var(--text-primary);
 }
 
-.chat-head p {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
-  line-height: 1.6;
+.pet-card {
+  padding: 8px;
 }
 
 .chat-window {
@@ -774,8 +794,7 @@ onBeforeUnmount(() => {
 }
 
 .stage-list,
-.source-list,
-.capability-list {
+.source-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -783,17 +802,15 @@ onBeforeUnmount(() => {
 }
 
 .stage-item,
-.source-item,
-.capability-item {
-  padding: 14px 15px;
-  border-radius: 16px;
+.source-item {
+  padding: 12px 14px;
+  border-radius: 14px;
   background: linear-gradient(180deg, var(--surface-muted), var(--surface-solid));
   border: 1px solid var(--border-color);
 }
 
 .stage-label,
-.source-title,
-.capability-title {
+.source-title {
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -801,8 +818,6 @@ onBeforeUnmount(() => {
 .stage-detail,
 .source-path,
 .source-summary,
-.capability-summary,
-.capability-detail,
 .empty-tip {
   margin-top: 6px;
   line-height: 1.65;
