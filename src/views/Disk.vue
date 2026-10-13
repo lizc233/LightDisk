@@ -146,7 +146,7 @@
 
       <div class="file-list-wrapper">
         <el-table v-if="listMode === 'detail'" :data="displayTableData" class="custom-table" @row-click="handleRowClick">
-          <el-table-column label="名称" min-width="320">
+          <el-table-column label="名称" min-width="280">
             <template #header>
               <div class="name-header">
                 <el-checkbox
@@ -198,12 +198,25 @@
             </template>
           </el-table-column>
 
-          <el-table-column prop="date" label="修改时间" width="180" />
+          <el-table-column prop="date" label="修改时间" width="170" />
 
-          <el-table-column label="" width="320" align="right">
+          <el-table-column
+            prop="size"
+            label="大小"
+            width="120"
+            align="right"
+            sortable
+            :sort-method="sizeSortMethod"
+          >
+            <template #default="{ row }">
+              <span class="size-cell">{{ row.isFolder ? '—' : formatBytes(row.size) }}</span>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="" width="300" align="right">
             <template #default="{ row }">
               <div class="premium-actions">
-                <button class="action-btn" @click.stop="requestDownload(row, 'button')">
+                <button class="action-btn" @click.stop="row.isFolder ? downloadFolder(row) : requestDownload(row, 'button')">
                   <el-icon><Download /></el-icon>
                   <span>下载</span>
                 </button>
@@ -503,6 +516,13 @@
       :start-index="galleryIndex"
     />
 
+    <!-- 全屏视频播放器（Range 流式，可拖进度条 / 倍速 / 画中画 / 记忆续播） -->
+    <VideoPlayer
+      v-model="videoVisible"
+      :file="videoFile"
+      :playlist="videoPlaylist"
+    />
+
     <!-- 标签管理（新建 / 改名 / 换色 / 删除） -->
     <el-dialog v-model="tagManageVisible" title="标签管理" width="520px" destroy-on-close>
       <div class="tag-manage-list">
@@ -553,6 +573,8 @@ import { usePreferencesStore } from '@/stores/preferences'
 import TextEditorDialog from '@/components/TextEditorDialog.vue'
 import OfficePreviewDialog from '@/components/OfficePreviewDialog.vue'
 import ImageGallery from '@/components/ImageGallery.vue'
+import VideoPlayer from '@/components/VideoPlayer.vue'
+import { usePlayerStore, AUDIO_EXTS } from '@/stores/player'
 import { formatBytes, fileExt } from '@/utils/format'
 import {
   ArrowRight,
@@ -565,6 +587,7 @@ import {
   FolderAdd,
   FolderOpened,
   Grid,
+  Headset,
   List,
   MoreFilled,
   Picture,
@@ -583,6 +606,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const preferencesStore = usePreferencesStore()
+const playerStore = usePlayerStore()
 
 const searchQuery = ref('')
 const tableData = ref([])
@@ -616,6 +640,7 @@ const sidebarEntries = computed(() => {
     { key: 'type:doc', type: 'type', label: '文档', icon: Document },
     { key: 'type:image', type: 'type', label: '图片', icon: Picture },
     { key: 'type:video', type: 'type', label: '视频', icon: VideoCamera },
+    { key: 'type:audio', type: 'type', label: '音频', icon: Headset },
     { key: 'fav', type: 'fav', label: '收藏', icon: StarFilled },
     ...tags.value.map(t => ({ key: `tag:${t.id}`, type: 'tag', label: t.name, color: t.color, tagId: t.id }))
   ]
@@ -823,6 +848,43 @@ const handleCardClick = (row) => {
   handleRowClick(row)
 }
 
+// ===== 视频播放器 / 音频播放条 =====
+const videoVisible = ref(false)
+const videoFile = ref(null)
+
+const isVideoFile = (row) => !row.isFolder && resolveFileCategory(row) === 'video'
+const isAudioFile = (row) => !row.isFolder && resolveFileCategory(row) === 'audio'
+
+/** 列表行 → 播放器可消费的媒体项（带 token 的流式地址） */
+const toMediaItem = (row) => ({
+  key: row.key,
+  id: row.id,
+  name: row.name,
+  size: row.size,
+  url: `/api/file/preview/${row.id}?token=${getToken()}`
+})
+
+/** 当前列表里的音频 → 播放条队列（决定「上一首 / 下一首」的范围） */
+const audioTracks = computed(() => displayTableData.value
+  .filter(row => isAudioFile(row))
+  .map(row => toMediaItem(row)))
+
+/** 当前列表里的视频 → 播放器内可左右切换 */
+const videoPlaylist = computed(() => displayTableData.value
+  .filter(row => isVideoFile(row))
+  .map(row => toMediaItem(row)))
+
+const playAudio = (row) => {
+  const list = audioTracks.value
+  const track = list.find(item => item.key === row.key) || toMediaItem(row)
+  playerStore.playTrack(track, list.length ? list : [track])
+}
+
+const openVideo = (row) => {
+  videoFile.value = toMediaItem(row)
+  videoVisible.value = true
+}
+
 // ===== 批量操作 =====
 const batchMode = ref(false)
 const selected = ref([])
@@ -914,6 +976,38 @@ const submitBatchDownload = async () => {
     ElMessage.error(e.message || '批量下载失败')
   } finally {
     batchDownloading.value = false
+  }
+}
+
+/**
+ * 文件夹一键下载：复用批量下载接口，由服务端递归展开目录并打包成 zip。
+ * 相比逐文件下载，只建立一次连接且保留目录层级。
+ */
+const downloadFolder = async (row) => {
+  if (preferencesStore.confirmBeforeDownload) {
+    try {
+      await ElMessageBox.confirm(
+        `即将把文件夹「${row.name}」打包为 zip 下载，是否继续？`,
+        '下载确认',
+        { confirmButtonText: '确认下载', cancelButtonText: '取消', type: 'info' }
+      )
+    } catch (e) {
+      return
+    }
+  }
+  try {
+    const blob = await request.post('/file/batch-download', {
+      folderIds: [row.id]
+    }, { responseType: 'blob', timeout: 0 })
+
+    if (blob instanceof Blob && blob.type && blob.type.includes('json')) {
+      const payload = JSON.parse(await blob.text())
+      throw new Error(payload?.msg || '打包失败')
+    }
+    saveBlob(blob, `${row.name}_${stamp()}.zip`)
+    ElMessage.success('已开始下载文件夹')
+  } catch (e) {
+    ElMessage.error(e.message || '文件夹下载失败')
   }
 }
 
@@ -1011,6 +1105,9 @@ const displayTableData = computed(() => {
   }
   return tableData.value.filter(item => item.name.toLowerCase().includes(keyword))
 })
+
+/** 大小列排序：按原始字节数比较（文件夹无 size，视为 0） */
+const sizeSortMethod = (a, b) => Number(a.size || 0) - Number(b.size || 0)
 
 const folderTreeData = computed(() => buildFolderTree(allFolders.value))
 
@@ -1168,6 +1265,18 @@ const handleRowClick = async (row) => {
   // 图片 → 全屏画廊（跟随用户设置的图片打开方式）
   if (isImageFile(row) && resolveOpenAction(row) === 'preview') {
     openGallery(row)
+    return
+  }
+
+  // 音频 → 底部常驻播放条（流式播放，不下载）
+  if (isAudioFile(row) && resolveOpenAction(row) === 'preview') {
+    playAudio(row)
+    return
+  }
+
+  // 视频 → 全屏播放器（支持 Range，可拖进度条）
+  if (isVideoFile(row) && resolveOpenAction(row) === 'preview') {
+    openVideo(row)
     return
   }
 
@@ -1354,6 +1463,7 @@ const getIconComponent = (row) => {
   const ext = row.name.split('.').pop().toLowerCase()
   if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) return Picture
   if (['mp4', 'avi', 'mov', 'mkv'].includes(ext)) return VideoCamera
+  if (AUDIO_EXTS.includes(ext)) return Headset
   return Document
 }
 
@@ -1362,6 +1472,7 @@ const resolveFileCategory = (row) => {
   const ext = row.name.split('.').pop().toLowerCase()
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image'
   if (['mp4', 'avi', 'mov', 'mkv', 'webm'].includes(ext)) return 'video'
+  if (AUDIO_EXTS.includes(ext)) return 'audio'
   if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md'].includes(ext)) return 'doc'
   return 'other'
 }
@@ -1383,10 +1494,12 @@ const isTextEditable = (row) => {
   return TEXT_EDITABLE_EXTS.includes(ext)
 }
 
-const resolveOpenAction = (row) => {  const category = resolveFileCategory(row)
+const resolveOpenAction = (row) => {
+  const category = resolveFileCategory(row)
   const info = userStore.userInfo || {}
   if (category === 'image') return info.imageOpenAction || 'preview'
   if (category === 'video') return info.videoOpenAction || 'preview'
+  if (category === 'audio') return info.audioOpenAction || 'preview'
   if (category === 'doc') return info.docOpenAction || 'download'
   return info.otherOpenAction || 'download'
 }
@@ -1397,6 +1510,7 @@ const isBrowserPreviewable = (row) => {
   return [
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg',
     'mp4', 'avi', 'mov', 'mkv', 'webm',
+    ...AUDIO_EXTS,
     'pdf', 'txt', 'md'
   ].includes(ext)
 }
@@ -1408,6 +1522,7 @@ const getIconColor = (row) => {
   if (['pdf'].includes(ext)) return '#F56C6C'
   if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) return '#409EFF'
   if (['png', 'jpg', 'jpeg', 'webp'].includes(ext)) return '#67C23A'
+  if (AUDIO_EXTS.includes(ext)) return '#8E44AD'
   return '#909399'
 }
 
@@ -2310,6 +2425,13 @@ onMounted(async () => {
 
 .download-noask {
   align-self: flex-start;
+}
+
+/* 列表：文件大小列 */
+.size-cell {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 批量分享结果 */

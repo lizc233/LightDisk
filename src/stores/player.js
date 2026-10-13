@@ -1,0 +1,229 @@
+import { defineStore } from 'pinia'
+import { computed, ref, watch } from 'vue'
+
+const STORAGE_KEY = 'lightdisk.player.state'
+
+/** 音频扩展名（与后端 category=audio 的过滤保持一致） */
+export const AUDIO_EXTS = ['mp3', 'flac', 'wav', 'aac', 'm4a', 'ogg', 'wma']
+
+/** 支持的倍速档位 */
+export const PLAY_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
+/** 循环模式：order-顺序 single-单曲 random-随机 */
+export const LOOP_MODES = [
+  { value: 'order', label: '顺序播放' },
+  { value: 'single', label: '单曲循环' },
+  { value: 'random', label: '随机播放' }
+]
+
+const readSaved = () => {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {}
+  } catch (e) {
+    return {}
+  }
+}
+
+/**
+ * 全局音频播放器状态。
+ *
+ * 与 DOM 解耦：store 只描述「该播什么、播到哪、是否在播」，
+ * 真正的 <audio> 元素由 AudioPlayerBar.vue 持有，通过 watch 双向同步。
+ * 这样播放条可以挂在 BasicLayout 上跨路由常驻，切页不断播。
+ */
+export const usePlayerStore = defineStore('player', () => {
+  const saved = readSaved()
+
+  /** 播放列表：[{ key, id, name, url, thumbUrl, size }] */
+  const playList = ref(Array.isArray(saved.playList) ? saved.playList : [])
+  const currentIndex = ref(Number.isInteger(saved.currentIndex) ? saved.currentIndex : -1)
+  const playing = ref(false)
+  const currentTime = ref(0)
+  const duration = ref(0)
+  const volume = ref(typeof saved.volume === 'number' ? saved.volume : 0.8)
+  const rate = ref(typeof saved.rate === 'number' ? saved.rate : 1)
+  const loopMode = ref(saved.loopMode || 'order')
+  /** 列表抽屉是否展开 */
+  const panelVisible = ref(false)
+  /** 每次自增用于通知 <audio> 重新加载当前曲目（单曲循环 / 重播） */
+  const reloadToken = ref(0)
+
+  const currentTrack = computed(() =>
+    currentIndex.value >= 0 ? (playList.value[currentIndex.value] || null) : null)
+
+  const hasTrack = computed(() => !!currentTrack.value)
+
+  const persist = () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      playList: playList.value,
+      currentIndex: currentIndex.value,
+      volume: volume.value,
+      rate: rate.value,
+      loopMode: loopMode.value
+    }))
+  }
+
+  watch([playList, currentIndex, volume, rate, loopMode], persist, { deep: true })
+
+  /** 用「当前列表 + 起始位置」开播（例如在音频分类里点第一首） */
+  const playFromList = (list, index = 0) => {
+    if (!Array.isArray(list) || !list.length) return
+    playList.value = list.slice()
+    currentIndex.value = Math.max(0, Math.min(index, list.length - 1))
+    currentTime.value = 0
+    duration.value = 0
+    playing.value = true
+    reloadToken.value += 1
+  }
+
+  /**
+   * 播放单曲：已在列表中则定位到它，否则追加进列表。
+   * 若点击的正是当前曲且正在播放，则切换为暂停。
+   * 传入 list 时用该列表整体替换播放列表（例如在某个文件夹里点某一首）。
+   */
+  const playTrack = (track, list) => {
+    if (!track) return
+    const useExternalList = Array.isArray(list) && list.length > 0
+    if (useExternalList) {
+      playList.value = list.slice()
+    }
+    const idx = playList.value.findIndex(t => t.key === track.key)
+    if (idx >= 0) {
+      if (idx === currentIndex.value && playing.value && !useExternalList) {
+        playing.value = false
+        return
+      }
+      currentIndex.value = idx
+    } else {
+      playList.value = [...playList.value, track]
+      currentIndex.value = playList.value.length - 1
+    }
+    currentTime.value = 0
+    duration.value = 0
+    playing.value = true
+    reloadToken.value += 1
+  }
+
+  const toggle = () => {
+    if (!hasTrack.value) return
+    playing.value = !playing.value
+  }
+
+  /** 下一首；auto=true 表示由播放结束自动触发（影响单曲循环语义） */
+  const next = (auto = false) => {
+    if (!playList.value.length) return
+    if (auto && loopMode.value === 'single') {
+      currentTime.value = 0
+      playing.value = true
+      reloadToken.value += 1
+      return
+    }
+    if (loopMode.value === 'random' && playList.value.length > 1) {
+      let idx = currentIndex.value
+      let guard = 0
+      while (idx === currentIndex.value && guard < 20) {
+        idx = Math.floor(Math.random() * playList.value.length)
+        guard += 1
+      }
+      currentIndex.value = idx
+    } else {
+      const nextIdx = currentIndex.value + 1
+      currentIndex.value = nextIdx >= playList.value.length ? 0 : nextIdx
+    }
+    currentTime.value = 0
+    playing.value = true
+    reloadToken.value += 1
+  }
+
+  const prev = () => {
+    if (!playList.value.length) return
+    if (currentTime.value > 5) {
+      // 与主流播放器一致：播放超过 5 秒时「上一首」先回到开头
+      currentTime.value = 0
+      reloadToken.value += 1
+      return
+    }
+    const nextIdx = currentIndex.value - 1
+    currentIndex.value = nextIdx < 0 ? playList.value.length - 1 : nextIdx
+    currentTime.value = 0
+    playing.value = true
+    reloadToken.value += 1
+  }
+
+  const seekTo = (seconds) => {
+    const value = Number(seconds)
+    if (!Number.isFinite(value) || value < 0) return
+    currentTime.value = value
+  }
+
+  const setVolume = (value) => {
+    volume.value = Math.max(0, Math.min(1, Number(value) || 0))
+  }
+
+  const setRate = (value) => {
+    rate.value = PLAY_RATES.includes(Number(value)) ? Number(value) : 1
+  }
+
+  const setLoopMode = (mode) => {
+    loopMode.value = LOOP_MODES.some(m => m.value === mode) ? mode : 'order'
+  }
+
+  const removeAt = (index) => {
+    if (index < 0 || index >= playList.value.length) return
+    const wasCurrent = index === currentIndex.value
+    playList.value = playList.value.filter((_, i) => i !== index)
+    if (!playList.value.length) {
+      currentIndex.value = -1
+      playing.value = false
+      currentTime.value = 0
+      duration.value = 0
+      return
+    }
+    if (wasCurrent) {
+      currentIndex.value = Math.min(index, playList.value.length - 1)
+      currentTime.value = 0
+      reloadToken.value += 1
+    } else if (index < currentIndex.value) {
+      currentIndex.value -= 1
+    }
+  }
+
+  const clearList = () => {
+    playList.value = []
+    currentIndex.value = -1
+    playing.value = false
+    currentTime.value = 0
+    duration.value = 0
+  }
+
+  const stop = () => {
+    playing.value = false
+  }
+
+  return {
+    playList,
+    currentIndex,
+    playing,
+    currentTime,
+    duration,
+    volume,
+    rate,
+    loopMode,
+    panelVisible,
+    reloadToken,
+    currentTrack,
+    hasTrack,
+    playFromList,
+    playTrack,
+    toggle,
+    next,
+    prev,
+    seekTo,
+    setVolume,
+    setRate,
+    setLoopMode,
+    removeAt,
+    clearList,
+    stop
+  }
+})

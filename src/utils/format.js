@@ -24,3 +24,14 @@ export function fileExt(name) {
   if (idx <= 0 || idx === name.length - 1) return ''
   return name.slice(idx + 1).toLowerCase()
 }
+
+/** 秒数 → mm:ss（超过 1 小时显示 h:mm:ss），用于播放器时间轴 */
+export function formatDuration(seconds) {
+  const total = Math.floor(Number(seconds) || 0)
+  if (!Number.isFinite(total) || total <= 0) return '00:00'
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  const pad = (n) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`
+}

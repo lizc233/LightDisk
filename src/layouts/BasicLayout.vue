@@ -164,6 +164,9 @@
           </router-view>
         </div>
       </el-main>
+
+      <!-- 全局音频播放条：挂在布局层，切换路由不断播 -->
+      <AudioPlayerBar />
     </el-container>
 
     <!-- 写私信弹窗 -->
@@ -183,6 +186,7 @@ import { usePreferencesStore } from '@/stores/preferences'
 import { getRecentAnnouncements, getSidebarAnnouncements } from '@/api/notification'
 import NotificationPanel from '@/components/NotificationPanel.vue'
 import WriteMessageDialog from '@/components/WriteMessageDialog.vue'
+import AudioPlayerBar from '@/components/AudioPlayerBar.vue'
 
 const route = useRoute()
 const router = useRouter()
