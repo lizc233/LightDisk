@@ -16,6 +16,7 @@
     "codemirror": "^6.0.2",
     "docx-preview": "^0.4.1",
     "element-plus": "^2.13.6",
+    "hls.js": "^1.7.3",
     "pinia": "^3.0.4",
     "spark-md5": "^3.0.2",
     "swiper": "^12.1.3",

@@ -15,7 +15,7 @@
             class="vp-video"
             preload="metadata"
             playsinline
-            :src="current.url"
+            :src="videoSrc"
             @click="togglePlay"
             @dblclick="toggleFullscreen"
             @timeupdate="onTimeUpdate"
@@ -24,15 +24,24 @@
             @play="onPlay"
             @pause="onPause"
             @ended="onEnded"
-            @waiting="buffering = true"
-            @playing="buffering = false"
-            @canplay="buffering = false"
+            @waiting="onWaiting"
+            @playing="onPlaying"
+            @canplay="onCanPlay"
+            @error="onVideoError"
           ></video>
 
           <!-- 加载中 -->
           <div v-if="buffering" class="vp-spinner">
             <span class="vp-spinner-ring"></span>
           </div>
+
+          <!-- 转码中提示（未就绪时回退原文件播放，同时后台转码） -->
+          <transition name="vp-fade">
+            <div v-if="transcodeHint" class="vp-transcode-hint">
+              <span class="vp-th-dot"></span>
+              {{ transcodeHint }}
+            </div>
+          </transition>
 
           <!-- 中央大播放按钮：暂停时显示 -->
           <button v-if="!playing && !buffering" class="vp-big-play" @click="togglePlay">
@@ -111,12 +120,34 @@
                 />
               </div>
 
+              <el-dropdown v-if="isHls && qualityOptions.length > 1" trigger="click" @command="setQuality">
+                <button class="vp-chip">{{ qualityLabel }}</button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="auto">自动</el-dropdown-item>
+                    <el-dropdown-item
+                      v-for="q in qualityOptions"
+                      :key="q.height"
+                      :command="q.height"
+                      :disabled="q.locked"
+                    >
+                      {{ q.label }}{{ q.locked ? '（会员专享）' : '' }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+
               <el-dropdown trigger="click" @command="setRate">
                 <button class="vp-chip">{{ rateLabel }}</button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item v-for="r in PLAY_RATES" :key="r" :command="r">
-                      {{ r.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') }}x
+                    <el-dropdown-item
+                      v-for="r in PLAY_RATES"
+                      :key="r"
+                      :command="r"
+                      :disabled="r > maxRate + 1e-6"
+                    >
+                      {{ r.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') }}x{{ r > maxRate + 1e-6 ? '（会员专享）' : '' }}
                     </el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -148,7 +179,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   Bell, Close, CloseBold, CopyDocument, DArrowLeft, DArrowRight,
   FullScreen, MuteNotification, VideoPause, VideoPlay
@@ -156,6 +187,8 @@ import {
 import { ElMessage } from 'element-plus'
 import { formatDuration } from '@/utils/format'
 import { PLAY_RATES } from '@/stores/player'
+import { QoeReporter } from '@/utils/qoe'
+import { fetchPlaybackInfo, checkQuality, checkRate, acquireStream, releaseStream, buildHlsUrl } from '@/api/video'
 
 const props = defineProps({
   /** 当前要播放的文件：{ key, id, name, size, url } */
@@ -189,6 +222,47 @@ let hideTimer = null
 let pendingRestore = false
 let unmutedVolume = volume.value || 0.8
 
+// ===== HLS / 转码 / 权限 / QoE 状态 =====
+const hlsInstance = ref(null)
+const isHls = ref(false)
+const transcodeHint = ref('')
+const playbackInfo = ref(null)
+const permission = ref({ maxVideoQuality: 360, maxPlaybackRate: 1, maxConcurrentStream: 1 })
+const qualityMode = ref('auto')
+const currentQualityHeight = ref(0)
+let qoe = null
+let acquireTimer = null
+let transcodePollTimer = null
+
+/** video 标签的真实地址：HLS 就绪用 m3u8，否则回退原文件直连 */
+const videoSrc = computed(() => {
+  if (isHls.value && current.value) return buildHlsUrl(current.value.id)
+  return current.value ? current.value.url : ''
+})
+
+/** 可用清晰度档位（带 VIP 锁定标记） */
+const qualityOptions = computed(() => {
+  const variants = playbackInfo.value?.variants || []
+  const limit = Number(permission.value.maxVideoQuality || 360)
+  return variants.map(v => {
+    const height = Number(v.height || 0)
+    return {
+      height,
+      label: `${height}p`,
+      locked: height > limit
+    }
+  })
+})
+
+const qualityLabel = computed(() => {
+  if (qualityMode.value === 'auto') {
+    return currentQualityHeight.value ? `自动(${currentQualityHeight.value}p)` : '自动'
+  }
+  return `${qualityMode.value}p`
+})
+
+const maxRate = computed(() => Number(permission.value.maxPlaybackRate || 1))
+
 const pipSupported = computed(() =>
   typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled)
 
@@ -216,6 +290,7 @@ watch(() => props.file, (val) => {
   currentTime.value = 0
   duration.value = 0
   buffered.value = 0
+  resetPlaybackSource()
   if (visible.value) {
     nextTick(() => loadAndPlay())
   }
@@ -235,20 +310,276 @@ watch(visible, (val) => {
     playing.value = false
     detachKeys()
     exitFullscreenIfNeeded()
+    teardownPlayback()
   }
 })
 
-const loadAndPlay = () => {
+/** 切换文件时清掉上一个文件的 HLS / 转码轮询 / QoE 会话 */
+const resetPlaybackSource = () => {
+  teardownPlayback()
+  isHls.value = false
+  playbackInfo.value = null
+  qualityMode.value = 'auto'
+  currentQualityHeight.value = 0
+  transcodeHint.value = ''
+}
+
+const teardownPlayback = () => {
+  if (transcodePollTimer) {
+    clearTimeout(transcodePollTimer)
+    transcodePollTimer = null
+  }
+  if (acquireTimer) {
+    clearTimeout(acquireTimer)
+    acquireTimer = null
+  }
+  if (hlsInstance.value) {
+    try { hlsInstance.value.destroy() } catch (e) { /* 忽略 */ }
+    hlsInstance.value = null
+  }
+  if (qoe) {
+    qoe.report()
+    qoe = null
+  }
+  releaseCurrentStream()
+}
+
+/** 释放并发播放流 */
+const releaseCurrentStream = () => {
+  if (!qoe) return
+  try {
+    releaseStream(qoe.sessionId)
+  } catch (e) { /* 忽略 */ }
+}
+
+/** 拉取转码状态与播放权限；未就绪时轮询等待 */
+const preparePlayback = async () => {
+  const fileId = current.value?.id
+  if (!fileId) return
+  try {
+    const res = await fetchPlaybackInfo(fileId)
+    const data = res?.data || {}
+    playbackInfo.value = data
+    if (data.permission) {
+      permission.value = data.permission
+    }
+    if (data.hlsReady) {
+      isHls.value = true
+      transcodeHint.value = ''
+      if (transcodePollTimer) {
+        clearTimeout(transcodePollTimer)
+        transcodePollTimer = null
+      }
+      startHls()
+      return
+    }
+    // 未就绪：先直连原文件播，同时后台轮询转码进度
+    isHls.value = false
+    const status = Number(data.status)
+    if (status === 0 || status === 1) {
+      transcodeHint.value = `正在转码 ${data.progress || 0}%，当前为原画质播放`
+      scheduleTranscodePoll()
+    } else if (status === 3) {
+      transcodeHint.value = '转码失败，当前为原画质播放'
+    }
+  } catch (e) {
+    /* 静默：接口异常时按直连原文件播放 */
+    isHls.value = false
+  }
+}
+
+const scheduleTranscodePoll = () => {
+  if (transcodePollTimer) return
+  transcodePollTimer = setTimeout(async () => {
+    transcodePollTimer = null
+    if (!visible.value || !current.value) return
+    try {
+      const res = await fetchPlaybackInfo(current.value.id)
+      const data = res?.data || {}
+      playbackInfo.value = data
+      if (data.permission) permission.value = data.permission
+      if (data.hlsReady) {
+        transcodeHint.value = '已切换至多清晰度播放'
+        isHls.value = true
+        startHls()
+        setTimeout(() => { transcodeHint.value = '' }, 2600)
+        return
+      }
+      const status = Number(data.status)
+      if (status === 0 || status === 1) {
+        transcodeHint.value = `正在转码 ${data.progress || 0}%，当前为原画质播放`
+        scheduleTranscodePoll()
+      } else if (status === 3) {
+        transcodeHint.value = '转码失败，当前为原画质播放'
+      }
+    } catch (e) {
+      scheduleTranscodePoll()
+    }
+  }, 5000)
+}
+
+/** 建立 hls.js 实例（动态 import，未就绪/不支持时回退原生播放） */
+const startHls = async () => {
+  const el = videoEl.value
+  if (!el || !current.value) return
+  if (hlsInstance.value) {
+    try { hlsInstance.value.destroy() } catch (e) { /* 忽略 */ }
+    hlsInstance.value = null
+  }
+  const url = buildHlsUrl(current.value.id)
+
+  // 原生支持 HLS（Safari / iOS）：直接用 src
+  if (el.canPlayType('application/vnd.apple.mpegurl')) {
+    el.src = url
+    el.load()
+    el.play().catch(() => { playing.value = false })
+    return
+  }
+
+  try {
+    const mod = await import('hls.js')
+    const Hls = mod.default || mod.Hls
+    if (!Hls || !Hls.isSupported()) {
+      isHls.value = false
+      el.src = current.value.url
+      el.load()
+      el.play().catch(() => { playing.value = false })
+      return
+    }
+    const hls = new Hls({ enableWorker: true, lowLatencyMode: false, maxBufferLength: 30 })
+    hlsInstance.value = hls
+    hls.attachMedia(el)
+    hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+      hls.loadSource(url)
+    })
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      applyQualityPreference()
+      el.play().catch(() => { playing.value = false })
+    })
+    hls.on(Hls.Events.LEVEL_SWITCHED, (_evt, data) => {
+      const level = hls.levels[data.level]
+      if (level) {
+        currentQualityHeight.value = level.height || 0
+        if (qoe) qoe.setQuality(qualityMode.value === 'auto' ? `${level.height}p` : `${qualityMode.value}p`)
+      }
+    })
+    hls.on(Hls.Events.LEVEL_LOADED, (_evt, data) => {
+      if (data?.details?.totalduration > 0 && data.details.fragments?.length) {
+        const frag = data.details.fragments[0]
+        if (frag?.duration > 0 && frag?.byteLength > 0) {
+          if (qoe) qoe.sampleBitrate((frag.byteLength * 8) / frag.duration)
+        }
+      }
+    })
+    hls.on(Hls.Events.ERROR, (_evt, data) => {
+      if (data?.fatal) {
+        ElMessage.warning('多清晰度播放异常，已切换原画质')
+        isHls.value = false
+        try { hls.destroy() } catch (e) { /* 忽略 */ }
+        hlsInstance.value = null
+        el.src = current.value.url
+        el.load()
+        el.play().catch(() => {})
+      }
+    })
+  } catch (e) {
+    isHls.value = false
+    el.src = current.value.url
+    el.load()
+    el.play().catch(() => {})
+  }
+}
+
+/**
+ * 应用清晰度偏好：auto → 限制 maxLevel 到等级允许的最高档；
+ * 指定档位 → 锁定该 level。超出权限直接提示（前端在这里先挡一层，后端仍会再校验）。
+ */
+const applyQualityPreference = () => {
+  const hls = hlsInstance.value
+  if (!hls) return
+  const limit = Number(permission.value.maxVideoQuality || 360)
+  if (qualityMode.value === 'auto') {
+    let best = -1
+    hls.levels.forEach((lv, idx) => {
+      if ((lv.height || 0) <= limit) best = idx
+    })
+    hls.autoLevelCapping = best >= 0 ? best : 0
+    hls.currentLevel = -1
+  } else {
+    const target = Number(qualityMode.value)
+    let idx = -1
+    hls.levels.forEach((lv, i) => {
+      if (Number(lv.height) === target) idx = i
+    })
+    if (idx >= 0) hls.currentLevel = idx
+  }
+}
+
+const setQuality = async (cmd) => {
+  if (!isHls.value || !current.value) {
+    ElMessage.info('多清晰度尚未就绪，当前为原画质')
+    return
+  }
+  if (cmd === 'auto') {
+    qualityMode.value = 'auto'
+    applyQualityPreference()
+    ElMessage.success('已切换为自动清晰度')
+    return
+  }
+  const height = Number(cmd)
+  try {
+    await checkQuality(current.value.id, height)
+  } catch (e) {
+    ElMessage.warning(e?.message || '当前等级不支持该清晰度，请升级会员')
+    return
+  }
+  qualityMode.value = height
+  applyQualityPreference()
+  ElMessage.success(`已切换为 ${height}p`)
+}
+
+const loadAndPlay = async () => {
   const el = videoEl.value
   if (!el) return
   el.volume = volume.value
   el.playbackRate = rate.value
   if ('preservesPitch' in el) el.preservesPitch = true
-  el.load()
+
+  // 每个文件新建一次 QoE 会话 + 并发流登记
+  if (!qoe && current.value) {
+    qoe = new QoeReporter({ fileId: current.value.id, playType: 'direct' })
+    requestStreamSlot()
+  }
+  if (qoe) qoe.markLoadStart()
+
+  await preparePlayback()
+
+  if (!isHls.value) {
+    el.load()
+  }
   const promise = el.play()
   if (promise && typeof promise.catch === 'function') {
     // 浏览器自动播放策略可能拦截，此时保留暂停态由用户点击
     promise.catch(() => { playing.value = false })
+  }
+}
+
+/** 登记并发播放流；超出上限时提示（不阻塞预览，仅提醒） */
+const requestStreamSlot = async () => {
+  if (!qoe) return
+  try {
+    const res = await acquireStream(qoe.sessionId)
+    if (res?.data) permission.value = res.data
+    if (qoe) qoe.playType = isHls.value ? 'hls' : 'direct'
+    // HLS 就绪后可能才切换，延迟再同步一次
+    acquireTimer = setTimeout(() => {
+      if (qoe) qoe.playType = isHls.value ? 'hls' : 'direct'
+    }, 4000)
+  } catch (e) {
+    const msg = e?.message || ''
+    if (msg.includes('上限')) {
+      ElMessage.warning(msg)
+    }
   }
 }
 
@@ -290,8 +621,50 @@ const togglePlay = () => {
   scheduleHide()
 }
 
-const onPlay = () => { playing.value = true; scheduleHide() }
-const onPause = () => { playing.value = false; controlsVisible.value = true }
+const onPlay = () => {
+  playing.value = true
+  if (qoe) qoe.markPlaying()
+  scheduleHide()
+}
+
+const onPause = () => {
+  playing.value = false
+  controlsVisible.value = true
+  if (qoe) qoe.markPaused()
+}
+
+/** 缓冲/卡顿开始 */
+const onWaiting = () => {
+  buffering.value = true
+  if (qoe) qoe.markStallStart()
+}
+
+/** 恢复播放 */
+const onPlaying = () => {
+  buffering.value = false
+  if (qoe) {
+    qoe.markStallEnd()
+    qoe.markFirstFrame()
+  }
+}
+
+const onCanPlay = () => {
+  buffering.value = false
+  if (qoe) qoe.markFirstFrame()
+}
+
+const onVideoError = () => {
+  // HLS 加载失败且当前是 HLS：回退原文件
+  if (isHls.value && current.value) {
+    isHls.value = false
+    const el = videoEl.value
+    if (el) {
+      el.src = current.value.url
+      el.load()
+      el.play().catch(() => {})
+    }
+  }
+}
 
 const onTimeUpdate = () => {
   const el = videoEl.value
@@ -331,6 +704,7 @@ const switchTo = (index) => {
   if (!list.length) return
   savePosition()
   const nextIdx = ((index % list.length) + list.length) % list.length
+  resetPlaybackSource()
   current.value = { ...list[nextIdx] }
   pendingRestore = true
   currentTime.value = 0
@@ -368,8 +742,17 @@ const toggleMute = () => {
   }
 }
 
-const setRate = (value) => {
+const setRate = async (value) => {
   const v = PLAY_RATES.includes(Number(value)) ? Number(value) : 1
+  if (v > maxRate.value + 1e-6) {
+    // 前端先挡一层，后端 /rate/check 仍会再校验（这里顺带给用户明确提示）
+    try {
+      if (current.value) await checkRate(current.value.id, v)
+    } catch (e) {
+      ElMessage.warning(e?.message || `当前等级最高支持 ${maxRate.value}x 倍速，请升级会员`)
+      return
+    }
+  }
   rate.value = v
   const el = videoEl.value
   if (el) {
@@ -523,11 +906,25 @@ const detachKeys = () => {
   clearTimeout(hideTimer)
 }
 
+// 关闭/刷新页面时用 sendBeacon 兜底上报 QoE，避免数据丢失
+const onBeforeUnload = () => {
+  if (qoe) qoe.reportOnUnload()
+  if (qoe) {
+    try { releaseStream(qoe.sessionId) } catch (e) { /* 忽略 */ }
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', onBeforeUnload)
+})
+
 onBeforeUnmount(() => {
   detachKeys()
   window.removeEventListener('pointermove', onProgressMove)
   window.removeEventListener('pointerup', onProgressUp)
+  window.removeEventListener('beforeunload', onBeforeUnload)
   savePosition()
+  teardownPlayback()
 })
 </script>
 
@@ -775,6 +1172,38 @@ onBeforeUnmount(() => {
   bottom: 6px;
   color: rgba(255, 255, 255, 0.35);
   font-size: 11px;
+}
+
+/* 转码提示：右上角小徽标，不遮挡画面 */
+.vp-transcode-hint {
+  position: absolute;
+  top: 66px;
+  right: 22px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(20, 22, 28, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.vp-th-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f7b955;
+  box-shadow: 0 0 0 0 rgba(247, 185, 85, 0.6);
+  animation: vp-pulse 1.6s infinite;
+}
+
+@keyframes vp-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(247, 185, 85, 0.6); }
+  70% { box-shadow: 0 0 0 7px rgba(247, 185, 85, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(247, 185, 85, 0); }
 }
 
 .vp-fade-enter-active,

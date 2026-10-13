@@ -56,6 +56,10 @@
             <el-icon><View /></el-icon>
             <span>操作审计</span>
           </el-menu-item>
+          <el-menu-item index="/app/admin/qoe">
+            <el-icon><VideoCamera /></el-icon>
+            <span>播放质量</span>
+          </el-menu-item>
         </el-sub-menu>
       </el-menu>
 
@@ -169,6 +173,9 @@
       <AudioPlayerBar />
     </el-container>
 
+    <!-- 全局传输列表：上传/下载任务的进度、暂停、取消，跨路由常驻 -->
+    <TransferPanel />
+
     <!-- 写私信弹窗 -->
     <WriteMessageDialog v-model="writeDialogVisible" @sent="handleMessageSent" />
   </el-container>
@@ -177,7 +184,7 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, ChatDotRound, Clock, DataBoard, Delete, Document, Message, Search, Setting, Share, User, View } from '@element-plus/icons-vue'
+import { Bell, ChatDotRound, Clock, DataBoard, Delete, Document, Message, Search, Setting, Share, User, VideoCamera, View } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import request from '@/utils/request'
 import { extractShareCode, isValidShareCode } from '@/utils/share'
@@ -187,6 +194,7 @@ import { getRecentAnnouncements, getSidebarAnnouncements } from '@/api/notificat
 import NotificationPanel from '@/components/NotificationPanel.vue'
 import WriteMessageDialog from '@/components/WriteMessageDialog.vue'
 import AudioPlayerBar from '@/components/AudioPlayerBar.vue'
+import TransferPanel from '@/components/TransferPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -207,6 +215,7 @@ const currentPageName = computed(() => {
     '/app/admin/users': '用户管理',
     '/app/admin/announcements': '公告管理',
     '/app/admin/audit': '操作审计',
+    '/app/admin/qoe': '播放质量看板',
     '/app/activity': '我的操作记录',
     '/app/profile': '个人中心',
     '/app/settings': '设置中心',

@@ -67,6 +67,11 @@ const routes = [
         component: () => import('@/views/admin/audit.vue')
       },
       {
+        path: 'admin/qoe',
+        name: 'AdminQoe',
+        component: () => import('@/views/admin/qoe.vue')
+      },
+      {
         path: 'activity',
         name: 'Activity',
         component: () => import('@/views/activity/index.vue')

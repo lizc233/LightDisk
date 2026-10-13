@@ -1,5 +1,21 @@
 <template>
-  <div class="dropbox-container">
+  <div
+    class="dropbox-container"
+    @dragenter="onFileDragEnter"
+    @dragover="onFileDragOver"
+    @dragleave="onFileDragLeave"
+    @drop="onFileDrop"
+  >
+    <!-- 全屏拖拽投放提示 -->
+    <transition name="drop-fade">
+      <div v-if="fileDragActive" class="drop-overlay">
+        <div class="drop-overlay-card">
+          <el-icon :size="40"><Upload /></el-icon>
+          <p class="drop-title">松开即可上传</p>
+          <p class="drop-sub">目标目录：{{ currentFolderName || '根目录' }}</p>
+        </div>
+      </div>
+    </transition>
     <div class="sub-sidebar">
       <div class="sidebar-header">
         <h2 class="title">所有文件</h2>
@@ -125,7 +141,6 @@
             size="small"
             type="primary"
             :disabled="!selected.length"
-            :loading="batchDownloading"
             @click="submitBatchDownload"
           >
             <el-icon><Download /></el-icon>&nbsp;批量下载
@@ -140,6 +155,7 @@
       <input
         ref="fileInput"
         type="file"
+        multiple
         style="display: none"
         @change="handleFileUpload"
       />
@@ -570,6 +586,9 @@ import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
+import { useTransferStore } from '@/stores/transfer'
+import { CHUNK_THRESHOLD, ChunkUploader, isAbortError, uploadSmallFile } from '@/utils/uploader'
+import { downloadWithProgress, pickSaveHandle, supportsFileSystemAccess } from '@/utils/downloader'
 import TextEditorDialog from '@/components/TextEditorDialog.vue'
 import OfficePreviewDialog from '@/components/OfficePreviewDialog.vue'
 import ImageGallery from '@/components/ImageGallery.vue'
@@ -607,6 +626,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const preferencesStore = usePreferencesStore()
 const playerStore = usePlayerStore()
+const transferStore = useTransferStore()
 
 const searchQuery = ref('')
 const tableData = ref([])
@@ -888,7 +908,6 @@ const openVideo = (row) => {
 // ===== 批量操作 =====
 const batchMode = ref(false)
 const selected = ref([])
-const batchDownloading = ref(false)
 const batchMoveMode = ref(false)
 const batchShareVisible = ref(false)
 const batchSharing = ref(false)
@@ -942,6 +961,7 @@ const saveBlob = (blob, filename) => {
   document.body.removeChild(link)
   window.URL.revokeObjectURL(url)
 }
+// saveBlob 供后续可能的「导出」类需求复用（下载已改走传输列表，可显示进度）
 
 const submitBatchDownload = async () => {
   if (!selected.value.length) {
@@ -959,24 +979,16 @@ const submitBatchDownload = async () => {
       return
     }
   }
-  batchDownloading.value = true
-  try {
-    const blob = await request.post('/file/batch-download', {
+  startDownload({
+    url: '/api/file/batch-download',
+    method: 'POST',
+    body: JSON.stringify({
       fileIds: selectedFileIds.value,
       folderIds: selectedFolderIds.value
-    }, { responseType: 'blob', timeout: 0 })
-
-    if (blob instanceof Blob && blob.type && blob.type.includes('json')) {
-      const payload = JSON.parse(await blob.text())
-      throw new Error(payload?.msg || '打包失败')
-    }
-    saveBlob(blob, `LightDisk_批量下载_${stamp()}.zip`)
-    ElMessage.success(`已开始下载 ${selected.value.length} 项`)
-  } catch (e) {
-    ElMessage.error(e.message || '批量下载失败')
-  } finally {
-    batchDownloading.value = false
-  }
+    }),
+    headers: { 'Content-Type': 'application/json' },
+    filename: `LightDisk_批量下载_${stamp()}.zip`
+  })
 }
 
 /**
@@ -995,20 +1007,13 @@ const downloadFolder = async (row) => {
       return
     }
   }
-  try {
-    const blob = await request.post('/file/batch-download', {
-      folderIds: [row.id]
-    }, { responseType: 'blob', timeout: 0 })
-
-    if (blob instanceof Blob && blob.type && blob.type.includes('json')) {
-      const payload = JSON.parse(await blob.text())
-      throw new Error(payload?.msg || '打包失败')
-    }
-    saveBlob(blob, `${row.name}_${stamp()}.zip`)
-    ElMessage.success('已开始下载文件夹')
-  } catch (e) {
-    ElMessage.error(e.message || '文件夹下载失败')
-  }
+  startDownload({
+    url: '/api/file/batch-download',
+    method: 'POST',
+    body: JSON.stringify({ folderIds: [row.id] }),
+    headers: { 'Content-Type': 'application/json' },
+    filename: `${row.name}_${stamp()}.zip`
+  })
 }
 
 const submitBatchDelete = async () => {
@@ -1319,8 +1324,11 @@ const handleDownload = (row) => {
     ElMessage.warning('文件夹暂不支持直接下载')
     return
   }
-  const token = getToken()
-  window.open(`/api/file/download/${row.id}?token=${token}`, '_self')
+  startDownload({
+    url: `/api/file/download/${row.id}`,
+    filename: row.name,
+    size: row.size || 0
+  })
 }
 
 // ===== 下载确认窗口 =====
@@ -1554,31 +1562,213 @@ const handleCreateFolder = async () => {
   }
 }
 
-const handleFileUpload = async (event) => {
-  const file = event.target.files[0]
-  if (!file) return
+// ===== 上传：拖拽 / 多选，大文件自动走分片 =====
+const fileDragActive = ref(false)
+let dragDepth = 0
 
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('folderId', currentFolderId.value)
+const hasDraggedFiles = (event) => {
+  const types = event.dataTransfer && event.dataTransfer.types
+  return !!types && Array.from(types).indexOf('Files') >= 0
+}
+
+const onFileDragEnter = (event) => {
+  if (!hasDraggedFiles(event)) return
+  dragDepth += 1
+  fileDragActive.value = true
+}
+
+const onFileDragOver = (event) => {
+  if (!hasDraggedFiles(event)) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+const onFileDragLeave = (event) => {
+  if (!hasDraggedFiles(event)) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) fileDragActive.value = false
+}
+
+const onFileDrop = (event) => {
+  dragDepth = 0
+  fileDragActive.value = false
+  if (!hasDraggedFiles(event)) return
+  event.preventDefault()
+  const files = Array.from((event.dataTransfer && event.dataTransfer.files) || [])
+  if (files.length) uploadFiles(files)
+}
+
+const currentFolderName = computed(() => {
+  if (!currentFolderId.value) return '根目录'
+  const list = breadcrumbs.value || []
+  const last = list[list.length - 1]
+  return (last && last.name) || '当前目录'
+})
+
+const uploaderOwnerId = () =>
+  userStore.userInfo?.id || userStore.userInfo?.userId || userStore.userInfo?.uid || 'anon'
+
+/** 多个任务几乎同时完成时，合并成一次列表刷新 */
+let listRefreshTimer = null
+const scheduleListRefresh = () => {
+  clearTimeout(listRefreshTimer)
+  listRefreshTimer = setTimeout(() => {
+    loadFileList()
+  }, 450)
+}
+
+const handleFileUpload = (event) => {
+  const input = event.target
+  const files = Array.from(input.files || [])
+  if (!files.length) return
+  uploadFiles(files)
+  // 上传流程仍在引用这些 File 对象，稍后再重置 input，避免底层数据被过早释放
+  setTimeout(() => {
+    try { input.value = '' } catch (e) { /* 忽略 */ }
+  }, 3000)
+}
+
+/**
+ * 上传入口：每个文件建一条传输任务，并立刻把浮层打开让用户看到进度。
+ * 小文件直传，大文件走「分片 + 断点续传 + 秒传」链路。
+ */
+const uploadFiles = (files) => {
+  const owner = uploaderOwnerId()
+  if (owner === 'anon') {
+    ElMessage.warning('登录信息异常，请重新登录后再上传')
+    return
+  }
+  files.forEach((file) => {
+    const chunky = file.size >= CHUNK_THRESHOLD && preferencesStore.enableChunkUpload
+    const task = transferStore.addTask({
+      kind: 'upload',
+      name: file.name,
+      size: file.size,
+      pausable: chunky
+    })
+    runUpload(file, task.id)
+  })
+  transferStore.panelVisible = true
+  if (files.length > 1) {
+    ElMessage.info(`已加入上传队列：${files.length} 个文件`)
+  }
+}
+
+const runUpload = async (file, taskId) => {
+  const useChunk = file.size >= CHUNK_THRESHOLD && preferencesStore.enableChunkUpload
+  transferStore.patchTask(taskId, { status: 'running', loaded: 0, error: '', phase: '', speed: 0, finishedAt: null })
+  const onProgress = (loaded) => transferStore.reportProgress(taskId, loaded)
 
   try {
-    ElMessage.info('正在上传...')
-    const res = await request.post('/file/upload', formData, {
-      timeout: 0
-    })
-    ElMessage.success('文件上传成功')
+    let result
+    if (!useChunk) {
+      transferStore.setPhase(taskId, '直传')
+      const { promise, abort } = uploadSmallFile(file, {
+        folderId: currentFolderId.value,
+        onProgress
+      })
+      transferStore.registerControl(taskId, {
+        cancel: () => abort(),
+        retry: () => runUpload(file, taskId)
+      })
+      result = await promise
+    } else {
+      transferStore.setPhase(taskId, '准备中')
+      const uploader = new ChunkUploader({
+        file,
+        folderId: currentFolderId.value,
+        userId: uploaderOwnerId(),
+        onProgress,
+        onPhase: (phase, ratio) => {
+          if (phase === 'hashing') {
+            transferStore.setPhase(taskId, `计算校验值 ${Math.round((ratio || 0) * 100)}%`)
+          } else if (phase === 'init') {
+            transferStore.setPhase(taskId, '建立上传会话')
+          } else if (phase === 'uploading') {
+            transferStore.setPhase(taskId, '并发上传分片')
+          } else if (phase === 'merging') {
+            transferStore.setPhase(taskId, '服务端合并校验')
+          }
+        }
+      })
+      transferStore.registerControl(taskId, {
+        pause: () => uploader.pause(),
+        resume: () => uploader.resume(),
+        cancel: () => uploader.cancel(),
+        retry: () => runUpload(file, taskId)
+      })
+      result = await uploader.start()
+    }
+
     // 上传后自动打上工具栏选择的标签
-    if (uploadTagIds.value.length && res.data) {
+    if (uploadTagIds.value.length && result && result.fileId) {
       try {
-        await request.post(`/file/${res.data}/tags`, { tagIds: uploadTagIds.value })
+        await request.post(`/file/${result.fileId}/tags`, { tagIds: uploadTagIds.value })
       } catch (e) { /* 打标失败不阻断上传流程 */ }
     }
-    await loadFileList()
+    transferStore.finishTask(taskId, { fileId: result && result.fileId, instant: !!(result && result.instant) })
+    scheduleListRefresh()
   } catch (error) {
+    if (isAbortError(error)) return
     console.error('上传失败:', error)
-  } finally {
-    event.target.value = ''
+    transferStore.failTask(taskId, (error && error.message) || '上传失败')
+  }
+}
+
+// ===== 下载：走传输列表，可看进度、可取消 =====
+/** 大文件改用 File System Access API 边下边写盘，避免整体读进内存 */
+const STREAM_WRITE_THRESHOLD = 512 * 1024 * 1024
+
+const authHeaderValue = () => {
+  const token = getToken()
+  if (!token) return ''
+  return token.startsWith('Bearer ') ? token : `Bearer ${token}`
+}
+
+const startDownload = (options) => {
+  const task = transferStore.addTask({
+    kind: 'download',
+    name: options.filename,
+    size: options.size || 0
+  })
+  transferStore.panelVisible = true
+  runDownload(options, task.id)
+}
+
+const runDownload = async (options, taskId) => {
+  const controller = new AbortController()
+  transferStore.patchTask(taskId, { status: 'running', loaded: 0, error: '', phase: '', speed: 0, finishedAt: null })
+  transferStore.registerControl(taskId, {
+    cancel: () => controller.abort(),
+    retry: () => runDownload(options, taskId)
+  })
+  try {
+    let handle = null
+    if ((options.size || 0) >= STREAM_WRITE_THRESHOLD && supportsFileSystemAccess()) {
+      handle = await pickSaveHandle(options.filename)
+      if (!handle) {
+        // 用户取消选择保存位置 → 放弃本次下载
+        transferStore.cancelTask(taskId)
+        return
+      }
+    }
+    await downloadWithProgress({
+      url: options.url,
+      method: options.method || 'GET',
+      body: options.body || null,
+      filename: options.filename,
+      total: options.size || 0,
+      handle,
+      headers: { ...(options.headers || {}), Authorization: authHeaderValue() },
+      signal: controller.signal,
+      onProgress: (loaded) => transferStore.reportProgress(taskId, loaded)
+    })
+    transferStore.finishTask(taskId)
+    ElMessage.success(`「${options.filename}」下载完成`)
+  } catch (error) {
+    if (isAbortError(error)) return
+    console.error('下载失败:', error)
+    transferStore.failTask(taskId, (error && error.message) || '下载失败')
   }
 }
 
@@ -1670,10 +1860,57 @@ onMounted(async () => {
 
 <style scoped>
 .dropbox-container {
+  position: relative;
   display: flex;
   height: 100%;
   min-height: 0;
   background: var(--surface-solid);
+}
+
+/* ===== 拖拽上传提示层 ===== */
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(16, 163, 127, 0.08);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.drop-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 36px 54px;
+  border-radius: 18px;
+  border: 2px dashed var(--accent);
+  background: var(--surface-solid);
+  color: var(--accent);
+  box-shadow: var(--shadow-soft);
+}
+
+.drop-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.drop-sub {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.drop-fade-enter-active,
+.drop-fade-leave-active {
+  transition: opacity 0.16s ease;
+}
+
+.drop-fade-enter-from,
+.drop-fade-leave-to {
+  opacity: 0;
 }
 
 .sub-sidebar {
