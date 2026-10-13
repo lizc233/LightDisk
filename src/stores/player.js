@@ -109,6 +109,23 @@ export const usePlayerStore = defineStore('player', () => {
     playing.value = !playing.value
   }
 
+  /**
+   * 追加单曲到列表末尾而不打断当前播放（已在列表中的曲子不重复添加）。
+   * 若当前没有任何曲目，则直接开始播放它。
+   */
+  const enqueue = (track) => {
+    if (!track) return
+    const exists = playList.value.some(t => t.key === track.key)
+    if (!exists) playList.value = [...playList.value, track]
+    if (currentIndex.value < 0) {
+      currentIndex.value = playList.value.findIndex(t => t.key === track.key)
+      currentTime.value = 0
+      duration.value = 0
+      playing.value = true
+      reloadToken.value += 1
+    }
+  }
+
   /** 下一首；auto=true 表示由播放结束自动触发（影响单曲循环语义） */
   const next = (auto = false) => {
     if (!playList.value.length) return
@@ -215,6 +232,7 @@ export const usePlayerStore = defineStore('player', () => {
     hasTrack,
     playFromList,
     playTrack,
+    enqueue,
     toggle,
     next,
     prev,

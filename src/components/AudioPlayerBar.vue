@@ -16,6 +16,15 @@
             @click="playIndex(index)"
           >
             <span class="ap-panel-index">{{ index === player.currentIndex && player.playing ? '▶' : index + 1 }}</span>
+            <span class="ap-panel-cover">
+              <img
+                v-if="item.coverUrl && !failedPanelCovers[item.key]"
+                :src="panelCoverSrc(item)"
+                alt=""
+                @error="failedPanelCovers[item.key] = true"
+              />
+              <el-icon v-else><Headset /></el-icon>
+            </span>
             <span class="ap-panel-name" :title="item.name">{{ item.name }}</span>
             <span class="ap-panel-size">{{ formatBytes(item.size) }}</span>
             <button class="ap-panel-remove" title="移出列表" @click.stop="player.removeAt(index)">
@@ -29,9 +38,13 @@
 
     <audio
       ref="audioEl"
+      :src="player.currentTrack?.url || ''"
       preload="metadata"
       @timeupdate="onTimeUpdate"
       @loadedmetadata="onLoadedMetadata"
+      @playing="onPlaying"
+      @waiting="onWaiting"
+      @pause="onPause"
       @ended="onEnded"
       @error="onError"
     ></audio>
@@ -39,7 +52,14 @@
     <!-- 左：曲目信息 -->
     <div class="ap-info">
       <div class="ap-cover">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <img
+          v-if="hasCover && !coverFailed"
+          :src="coverSrc"
+          class="ap-cover-img"
+          alt=""
+          @error="coverFailed = true"
+        />
+        <svg v-else viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
           <path d="M7 17.5a2.5 2.5 0 1 0 0-.01M7 15V4l10-2v10.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
           <circle cx="17" cy="15.4" r="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
         </svg>
@@ -49,6 +69,16 @@
         <span class="ap-sub">{{ formatBytes(player.currentTrack?.size) }} · {{ rateLabel }}</span>
       </div>
     </div>
+
+    <!-- 频谱可视化：Web Audio API 实时柱状图（不可用时自动隐藏） -->
+    <canvas
+      v-show="spectrumOn"
+      ref="spectrumEl"
+      class="ap-spectrum"
+      width="180"
+      height="44"
+      title="实时频谱"
+    ></canvas>
 
     <!-- 中：控制 + 进度 -->
     <div class="ap-center">
@@ -119,6 +149,16 @@
       </div>
 
       <button
+        v-if="spectrumSupported"
+        class="ap-btn"
+        :class="{ on: spectrumOn }"
+        title="频谱可视化"
+        @click="toggleSpectrum"
+      >
+        <el-icon><Histogram /></el-icon>
+      </button>
+
+      <button
         class="ap-btn"
         :class="{ on: player.panelVisible }"
         title="播放列表"
@@ -135,11 +175,12 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { Bell, Close, DArrowLeft, DArrowRight, List, VideoPause, VideoPlay } from '@element-plus/icons-vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { Bell, Close, DArrowLeft, DArrowRight, Headset, Histogram, List, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { usePlayerStore, LOOP_MODES, PLAY_RATES } from '@/stores/player'
 import { formatBytes, formatDuration } from '@/utils/format'
+import { QoeReporter } from '@/utils/qoe'
 
 const player = usePlayerStore()
 
@@ -147,6 +188,144 @@ const audioEl = ref(null)
 const progressEl = ref(null)
 const dragging = ref(false)
 const buffered = ref(0)
+
+// ===== 封面（ID3 APIC 内嵌图，后端按 MD5 缓存）=====
+const coverFailed = ref(false)
+const failedPanelCovers = reactive({})
+const coverSrc = computed(() => player.currentTrack?.coverUrl || '')
+const hasCover = computed(() => !!coverSrc.value)
+const panelCoverSrc = (item) => item.coverUrl || ''
+
+// 切歌时重置封面失败态，让新曲目重新尝试加载
+watch(() => player.currentTrack?.key, () => {
+  coverFailed.value = false
+  startSession()
+})
+
+// ===== 播放质量埋点（与视频共用同一套 QoeReporter）=====
+let qoe = null
+const startSession = () => {
+  // 结束上一会话并结算
+  if (qoe) qoe.report()
+  const track = player.currentTrack
+  qoe = track ? new QoeReporter({ fileId: track.id, playType: 'audio' }) : null
+  if (qoe) {
+    qoe.markLoadStart()
+    qoe.setQuality('audio')
+  }
+}
+const finishSession = () => {
+  if (qoe) {
+    qoe.markPaused()
+    qoe.report()
+    qoe = null
+  }
+}
+
+// ===== Web Audio 频谱可视化 =====
+const spectrumEl = ref(null)
+// 只要浏览器有 AudioContext 就展示开关；真正建图失败时再降级隐藏
+const spectrumSupported = ref(!!(window.AudioContext || window.webkitAudioContext))
+const spectrumOn = ref((() => {
+  try {
+    return localStorage.getItem('lightdisk.audio.spectrum') === '1'
+  } catch (e) {
+    return false
+  }
+})())
+let audioCtx = null
+let analyser = null
+let sourceNode = null
+let freqData = null
+let rafId = 0
+
+const toggleSpectrum = () => {
+  spectrumOn.value = !spectrumOn.value
+  try {
+    localStorage.setItem('lightdisk.audio.spectrum', spectrumOn.value ? '1' : '0')
+  } catch (e) { /* 忽略 */ }
+  if (spectrumOn.value) {
+    ensureAudioGraph()
+    if (player.playing) startSpectrumLoop()
+  } else {
+    stopSpectrumLoop()
+    clearSpectrum()
+  }
+}
+
+/**
+ * 建立 Web Audio 图：<audio> → AnalyserNode → destination。
+ * createMediaElementSource 对同一元素只能调用一次，故用 sourceNode 做幂等。
+ */
+const ensureAudioGraph = () => {
+  if (sourceNode) return
+  const el = audioEl.value
+  if (!el) return
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    audioCtx = new Ctx()
+    analyser = audioCtx.createAnalyser()
+    analyser.fftSize = 128
+    analyser.smoothingTimeConstant = 0.8
+    sourceNode = audioCtx.createMediaElementSource(el)
+    sourceNode.connect(analyser)
+    analyser.connect(audioCtx.destination)
+    freqData = new Uint8Array(analyser.frequencyBinCount)
+    spectrumSupported.value = true
+  } catch (e) {
+    // 跨域音频 / 重复 createMediaElementSource 等异常：彻底降级为无频谱
+    spectrumSupported.value = false
+    spectrumOn.value = false
+    audioCtx = null
+    analyser = null
+    sourceNode = null
+  }
+}
+
+const drawSpectrum = () => {
+  const canvas = spectrumEl.value
+  if (!canvas || !analyser || !freqData) return
+  analyser.getByteFrequencyData(freqData)
+  const ctx = canvas.getContext('2d')
+  const { width, height } = canvas
+  ctx.clearRect(0, 0, width, height)
+  const bars = Math.min(40, freqData.length)
+  const barWidth = width / bars
+  const accent = getComputedStyle(canvas).getPropertyValue('--accent').trim() || '#4f7cff'
+  ctx.fillStyle = accent
+  for (let i = 0; i < bars; i += 1) {
+    const value = freqData[i] / 255
+    const barHeight = Math.max(2, value * height)
+    const x = i * barWidth
+    ctx.globalAlpha = 0.35 + value * 0.65
+    ctx.fillRect(x + 1, height - barHeight, Math.max(1, barWidth - 2), barHeight)
+  }
+  ctx.globalAlpha = 1
+}
+
+const startSpectrumLoop = () => {
+  if (!spectrumOn.value) return
+  cancelAnimationFrame(rafId)
+  const loop = () => {
+    drawSpectrum()
+    rafId = requestAnimationFrame(loop)
+  }
+  rafId = requestAnimationFrame(loop)
+}
+
+const stopSpectrumLoop = () => {
+  cancelAnimationFrame(rafId)
+  rafId = 0
+}
+
+const clearSpectrum = () => {
+  const canvas = spectrumEl.value
+  if (canvas) {
+    const ctx = canvas.getContext('2d')
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+  }
+}
 
 const progressPercent = computed(() => {
   if (!player.duration) return 0
@@ -172,13 +351,11 @@ const loopIcon = computed(() => {
   return '顺序'
 })
 
-// 曲目切换：换源并播放
+// 曲目切换：:src 绑定会自动触发浏览器重新加载，这里只需同步播放状态
+// （此前手动 load() 会 abort 掉播放 promise，把 AbortError 误判成自动播放拦截）
 watch(() => player.currentTrack?.url, () => {
   nextTick(() => {
-    const el = audioEl.value
-    if (!el) return
     buffered.value = 0
-    el.load()
     syncPlayback()
   })
 })
@@ -228,8 +405,10 @@ const syncPlayback = () => {
   if (player.playing) {
     const promise = el.play()
     if (promise && typeof promise.catch === 'function') {
-      promise.catch(() => {
-        // 浏览器自动播放策略拦截或无有效源时，回退为暂停态
+      promise.catch((err) => {
+        // 换源/快速切换导致的 AbortError 不算播放失败，静默忽略；
+        // 只有自动播放被策略拦截（NotAllowedError）或真正无源时才回退暂停态
+        if (err && err.name === 'AbortError') return
         player.stop()
       })
     }
@@ -254,12 +433,44 @@ const onLoadedMetadata = () => {
   el.volume = player.volume
   el.playbackRate = player.rate
   if ('preservesPitch' in el) el.preservesPitch = true
+  // 元数据就绪即认为首帧可用，记一次首帧耗时
+  if (qoe) qoe.markFirstFrame()
 }
 
-const onEnded = () => player.next(true)
+// ===== 媒体事件（QoE 采集 + 频谱启停）=====
+const onPlaying = () => {
+  if (qoe) {
+    qoe.markFirstFrame()
+    qoe.markPlaying()
+    qoe.markStallEnd()
+  }
+  if (spectrumOn.value) {
+    ensureAudioGraph()
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {})
+    startSpectrumLoop()
+  }
+}
+
+const onWaiting = () => {
+  if (qoe) qoe.markStallStart()
+  if (qoe) qoe.markPaused()
+}
+
+const onPause = () => {
+  if (qoe) qoe.markPaused()
+  stopSpectrumLoop()
+  clearSpectrum()
+}
+
+const onEnded = () => {
+  finishSession()
+  player.next(true)
+}
 
 const onError = () => {
   if (!player.hasTrack) return
+  if (qoe) qoe.report()
+  qoe = null
   ElMessage.warning('音频加载失败，已跳到下一首')
   player.next(true)
 }
@@ -273,6 +484,8 @@ const playIndex = (index) => {
 }
 
 const closePlayer = () => {
+  finishSession()
+  stopSpectrumLoop()
   player.stop()
   player.clearList()
   player.panelVisible = false
@@ -317,9 +530,34 @@ const onProgressUp = () => {
   window.removeEventListener('pointerup', onProgressUp)
 }
 
+/** 页面卸载：sendBeacon 同步兜底上报 QoE，避免刷新/关闭丢数据 */
+const onBeforeUnload = () => {
+  if (qoe) {
+    qoe.markPaused()
+    qoe.reportOnUnload()
+    qoe = null
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', onBeforeUnload)
+  // 恢复上次会话（Pinia+localStorage 已恢复曲目）时，若在播放态则建立新埋点会话
+  if (player.hasTrack) startSession()
+  if (spectrumOn.value) nextTick(() => ensureAudioGraph())
+})
+
 onBeforeUnmount(() => {
   window.removeEventListener('pointermove', onProgressMove)
   window.removeEventListener('pointerup', onProgressUp)
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  stopSpectrumLoop()
+  finishSession()
+  if (audioCtx) {
+    try {
+      audioCtx.close()
+    } catch (e) { /* 忽略 */ }
+    audioCtx = null
+  }
 })
 </script>
 
@@ -355,6 +593,22 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   background: var(--accent-soft);
   color: var(--accent);
+  overflow: hidden;
+}
+
+.ap-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ap-spectrum {
+  flex: 0 0 auto;
+  width: 180px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--accent-soft);
 }
 
 .ap-meta {
@@ -602,6 +856,27 @@ onBeforeUnmount(() => {
   flex: 0 0 18px;
   text-align: center;
   font-size: 12px;
+}
+
+.ap-panel-cover {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  overflow: hidden;
+  font-size: 14px;
+}
+
+.ap-panel-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .ap-panel-name {

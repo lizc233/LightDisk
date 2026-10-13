@@ -110,6 +110,16 @@
           <el-icon><Select /></el-icon>
           <span>{{ batchMode ? '退出批量' : '批量下载' }}</span>
         </div>
+        <!-- 一键入队：当前视图（文件夹 / 音频分类 / 搜索）下所有音频一次性加入播放列表 -->
+        <div
+          v-if="audioTracks.length"
+          class="action-tile light"
+          :title="`把当前列表里的 ${audioTracks.length} 个音频全部加入播放列表`"
+          @click="playAllAudio"
+        >
+          <el-icon><Headset /></el-icon>
+          <span>播放全部（{{ audioTracks.length }}）</span>
+        </div>
       </div>
 
       <!-- 视图切换：仅在「图片」分类下出现 -->
@@ -235,6 +245,16 @@
                 <button class="action-btn" @click.stop="row.isFolder ? downloadFolder(row) : requestDownload(row, 'button')">
                   <el-icon><Download /></el-icon>
                   <span>下载</span>
+                </button>
+
+                <button
+                  v-if="isAudioFile(row)"
+                  class="action-btn"
+                  title="加入播放列表（不打断当前播放）"
+                  @click.stop="enqueueAudio(row)"
+                >
+                  <el-icon><Headset /></el-icon>
+                  <span>加入列表</span>
                 </button>
 
                 <button class="action-btn" @click.stop="handleShare(row)">
@@ -594,6 +614,7 @@ import OfficePreviewDialog from '@/components/OfficePreviewDialog.vue'
 import ImageGallery from '@/components/ImageGallery.vue'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import { usePlayerStore, AUDIO_EXTS } from '@/stores/player'
+import { buildAudioCoverUrl } from '@/api/audio'
 import { formatBytes, fileExt } from '@/utils/format'
 import {
   ArrowRight,
@@ -875,13 +896,15 @@ const videoFile = ref(null)
 const isVideoFile = (row) => !row.isFolder && resolveFileCategory(row) === 'video'
 const isAudioFile = (row) => !row.isFolder && resolveFileCategory(row) === 'audio'
 
-/** 列表行 → 播放器可消费的媒体项（带 token 的流式地址） */
+/** 列表行 → 播放器可消费的媒体项（带 token 的流式地址 + 可选内嵌封面） */
 const toMediaItem = (row) => ({
   key: row.key,
   id: row.id,
   name: row.name,
   size: row.size,
-  url: `/api/file/preview/${row.id}?token=${getToken()}`
+  url: `/api/file/preview/${row.id}?token=${getToken()}`,
+  // 音频内嵌封面（ID3 APIC）；无封面后端返回 404，前端 <img> 自动回落到音符图标
+  coverUrl: isAudioFile(row) ? buildAudioCoverUrl(row.id) : ''
 })
 
 /** 当前列表里的音频 → 播放条队列（决定「上一首 / 下一首」的范围） */
@@ -898,6 +921,26 @@ const playAudio = (row) => {
   const list = audioTracks.value
   const track = list.find(item => item.key === row.key) || toMediaItem(row)
   playerStore.playTrack(track, list.length ? list : [track])
+}
+
+/**
+ * 一键入队：把当前视图里的音频整体加入播放列表并从第一首开始播放。
+ * 范围由 audioTracks 决定 —— 即「当前文件夹 / 当前音频分类 / 当前搜索结果」。
+ */
+const playAllAudio = () => {
+  const list = audioTracks.value
+  if (!list.length) {
+    ElMessage.info('当前列表没有音频文件')
+    return
+  }
+  playerStore.playFromList(list, 0)
+  ElMessage.success(`已加入播放列表 ${list.length} 首`)
+}
+
+/** 单首入队（不打断当前播放）：右键菜单用 */
+const enqueueAudio = (row) => {
+  playerStore.enqueue(toMediaItem(row))
+  ElMessage.success('已加入播放列表')
 }
 
 const openVideo = (row) => {
