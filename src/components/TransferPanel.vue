@@ -1,8 +1,12 @@
 <template>
-  <div class="transfer-dock" :class="{ 'with-player': player.hasTrack }">
+  <div
+    class="transfer-dock"
+    :class="{ 'with-player': player.hasTrack, 'is-dragging': dragging, docked: !hasCustomPos }"
+    :style="dockStyle"
+  >
     <!-- 展开面板 -->
     <transition name="tp-slide">
-      <div v-if="store.panelVisible" class="tp-panel">
+      <div v-if="store.panelVisible" class="tp-panel" :class="{ 'flip-x': flippedX, 'flip-y': flippedY }">
         <header class="tp-head">
           <div class="tp-title">
             <span>传输列表</span>
@@ -92,12 +96,13 @@
       </div>
     </transition>
 
-    <!-- 悬浮入口 -->
+    <!-- 悬浮入口（可拖动换位；单击切换面板） -->
     <button
       class="tp-fab"
-      :class="{ busy: store.activeCount > 0 }"
-      :title="store.activeCount ? `${store.activeCount} 个任务进行中` : '传输列表'"
-      @click="store.panelVisible = !store.panelVisible"
+      :class="{ busy: store.activeCount > 0, 'flip-y-anchor': flippedY }"
+      :title="(store.activeCount ? `${store.activeCount} 个任务进行中` : '传输列表') + '（可拖动）'"
+      @pointerdown="onFabPointerDown"
+      @click="onFabClick"
     >
       <el-icon><Sort /></el-icon>
       <span v-if="store.activeCount" class="tp-badge">{{ store.activeCount }}</span>
@@ -106,6 +111,7 @@
 </template>
 
 <script setup>
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { Close, CloseBold, Delete, Download, RefreshRight, Sort, Upload, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { useTransferStore } from '@/stores/transfer'
 import { usePlayerStore } from '@/stores/player'
@@ -113,6 +119,125 @@ import { formatBytes } from '@/utils/format'
 
 const store = useTransferStore()
 const player = usePlayerStore()
+
+// ===== 悬浮图标拖动 =====
+const POS_KEY = 'lightdisk.transfer.fab.pos'
+const FAB_SIZE = 48
+const MARGIN = 8
+
+/** 读取已保存的位置（相对视口左上角的 left/top） */
+const loadPos = () => {
+  try {
+    const raw = localStorage.getItem(POS_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw)
+    if (Number.isFinite(p?.left) && Number.isFinite(p?.top)) return { left: p.left, top: p.top }
+  } catch (e) { /* 忽略 */ }
+  return null
+}
+
+const customPos = ref(loadPos())
+const dragging = ref(false)
+const hasCustomPos = computed(() => !!customPos.value)
+
+/** 依位置计算面板向上/向左展开方向，避免超出视口 */
+const flippedX = computed(() => {
+  if (!customPos.value) return false
+  return customPos.value.left < 420
+})
+const flippedY = computed(() => {
+  if (!customPos.value) return false
+  return customPos.value.top < 300
+})
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+
+const dockStyle = computed(() => {
+  if (!customPos.value) return {}
+  return { left: `${customPos.value.left}px`, top: `${customPos.value.top}px`, right: 'auto', bottom: 'auto' }
+})
+
+let startX = 0
+let startY = 0
+let originLeft = 0
+let originTop = 0
+let moved = false
+let pointerId = null
+
+const onFabPointerDown = (evt) => {
+  // 右键 / 非主键忽略
+  if (evt.button !== undefined && evt.button !== 0) return
+  const el = evt.currentTarget
+  const rect = el.getBoundingClientRect()
+  dragging.value = true
+  moved = false
+  pointerId = evt.pointerId
+  startX = evt.clientX
+  startY = evt.clientY
+  originLeft = rect.left
+  originTop = rect.top
+  try { el.setPointerCapture(pointerId) } catch (e) { /* 忽略 */ }
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', onPointerUp)
+}
+
+const onPointerMove = (evt) => {
+  if (!dragging.value) return
+  const dx = evt.clientX - startX
+  const dy = evt.clientY - startY
+  if (!moved && Math.abs(dx) + Math.abs(dy) < 4) return
+  moved = true
+  const maxLeft = window.innerWidth - FAB_SIZE - MARGIN
+  const maxTop = window.innerHeight - FAB_SIZE - MARGIN
+  customPos.value = {
+    left: clamp(originLeft + dx, MARGIN, Math.max(MARGIN, maxLeft)),
+    top: clamp(originTop + dy, MARGIN, Math.max(MARGIN, maxTop))
+  }
+}
+
+const onPointerUp = () => {
+  if (!dragging.value) return
+  dragging.value = false
+  if (pointerId !== null) {
+    try { document.querySelector('.tp-fab')?.releasePointerCapture(pointerId) } catch (e) { /* 忽略 */ }
+    pointerId = null
+  }
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
+  if (moved && customPos.value) {
+    try { localStorage.setItem(POS_KEY, JSON.stringify(customPos.value)) } catch (e) { /* 忽略 */ }
+  }
+}
+
+/** 拖动结束后紧接着的 click 不当作「切换面板」，避免误触 */
+const onFabClick = () => {
+  if (moved) {
+    moved = false
+    return
+  }
+  store.panelVisible = !store.panelVisible
+}
+
+// 窗口缩放时把浮动图标拉回可视区域内
+const onResize = () => {
+  if (!customPos.value) return
+  const maxLeft = window.innerWidth - FAB_SIZE - MARGIN
+  const maxTop = window.innerHeight - FAB_SIZE - MARGIN
+  customPos.value = {
+    left: clamp(customPos.value.left, MARGIN, Math.max(MARGIN, maxLeft)),
+    top: clamp(customPos.value.top, MARGIN, Math.max(MARGIN, maxTop))
+  }
+}
+window.addEventListener('resize', onResize)
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
+  window.removeEventListener('resize', onResize)
+})
 
 const percent = (task) => {
   if (task.status === 'success') return 100
@@ -155,9 +280,19 @@ const statusText = (task) => {
   gap: 10px;
 }
 
+/* 未拖动过：沿用右下角默认定位；拖动后由内联 left/top 接管 */
+.transfer-dock:not(.docked) {
+  right: auto;
+  bottom: auto;
+}
+
 /* 音频播放条占据底部时上移，避免遮挡 */
-.transfer-dock.with-player {
+.transfer-dock.docked.with-player {
   bottom: 92px;
+}
+
+.transfer-dock.is-dragging {
+  z-index: 2600;
 }
 
 .tp-fab {
@@ -169,12 +304,18 @@ const statusText = (task) => {
   background: var(--surface-solid);
   color: var(--text-secondary);
   box-shadow: var(--shadow-soft);
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
   transition: transform 0.16s ease, color 0.16s ease;
+}
+
+.transfer-dock.is-dragging .tp-fab {
+  cursor: grabbing;
+  transform: scale(1.06);
 }
 
 .tp-fab:hover {
@@ -212,6 +353,20 @@ const statusText = (task) => {
   background: var(--surface-solid);
   box-shadow: var(--shadow-soft);
   overflow: hidden;
+}
+
+/* 图标拖到左侧时面板靠左对齐，避免超出右边界 */
+.transfer-dock:not(.docked) .tp-panel.flip-x {
+  align-self: flex-start;
+}
+
+/* 图标拖到上方时面板向下展开（放在 FAB 下方），避免超出顶部 */
+.transfer-dock:not(.docked) .tp-panel.flip-y {
+  order: 2;
+}
+
+.transfer-dock:not(.docked) .tp-fab.flip-y-anchor {
+  order: 1;
 }
 
 .tp-head {

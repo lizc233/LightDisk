@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const STORAGE_KEY = 'lightdisk.transfer.state'
 const MAX_KEEP = 40
@@ -264,6 +264,40 @@ export const useTransferStore = defineStore('transfer', () => {
   const unregisterControl = (id) => {
     controls.delete(id)
   }
+
+  /**
+   * 全部任务结束后 5 秒自动收起面板（不用等用户手动点 X）。
+   *
+   * 规则：
+   *  - 从「有进行中任务」变为「全部结束」才启动倒计时；新任务进来立即取消倒计时
+   *  - 面板未展开时不动作，避免干扰（用户自己关掉的就别管）
+   *  - 用户手动改过 panelVisible（例如重新展开）也会重置计时
+   */
+  const AUTO_HIDE_DELAY = 5000
+  let autoHideTimer = null
+
+  const cancelAutoHide = () => {
+    if (autoHideTimer) {
+      clearTimeout(autoHideTimer)
+      autoHideTimer = null
+    }
+  }
+
+  watch(activeCount, (count, prev) => {
+    if (count > 0) {
+      // 又有任务在跑：撤销待执行的隐退
+      cancelAutoHide()
+      return
+    }
+    if (prev > 0 && panelVisible.value) {
+      cancelAutoHide()
+      autoHideTimer = setTimeout(() => {
+        autoHideTimer = null
+        // 倒计时期间若又来了新任务则不收
+        if (activeCount.value === 0) panelVisible.value = false
+      }, AUTO_HIDE_DELAY)
+    }
+  })
 
   return {
     tasks,

@@ -171,8 +171,15 @@
       />
 
       <div class="file-list-wrapper">
-        <el-table v-if="listMode === 'detail'" :data="displayTableData" class="custom-table" @row-click="handleRowClick">
-          <el-table-column label="名称" min-width="280">
+        <el-table
+          v-if="listMode === 'detail'"
+          :data="sortedTableData"
+          class="custom-table"
+          :default-sort="{ prop: 'name', order: nameSortOrder === 'desc' ? 'descending' : 'ascending' }"
+          @sort-change="onNameSortChange"
+          @row-click="handleRowClick"
+        >
+          <el-table-column prop="name" label="名称" min-width="280" sortable="custom">
             <template #header>
               <div class="name-header">
                 <el-checkbox
@@ -616,6 +623,7 @@ import VideoPlayer from '@/components/VideoPlayer.vue'
 import { usePlayerStore, AUDIO_EXTS } from '@/stores/player'
 import { buildAudioCoverUrl } from '@/api/audio'
 import { formatBytes, fileExt } from '@/utils/format'
+import { compareByName } from '@/utils/pinyinSort'
 import {
   ArrowRight,
   Clock,
@@ -907,13 +915,16 @@ const toMediaItem = (row) => ({
   coverUrl: isAudioFile(row) ? buildAudioCoverUrl(row.id) : ''
 })
 
-/** 当前列表里的音频 → 播放条队列（决定「上一首 / 下一首」的范围） */
-const audioTracks = computed(() => displayTableData.value
+/**
+ * 当前列表里的音频 → 播放条队列（决定「上一首 / 下一首」的范围）。
+ * 直接采样 sortedTableData，与列表显示顺序（默认按名称拼音混排）保持一致。
+ */
+const audioTracks = computed(() => sortedTableData.value
   .filter(row => isAudioFile(row))
   .map(row => toMediaItem(row)))
 
 /** 当前列表里的视频 → 播放器内可左右切换 */
-const videoPlaylist = computed(() => displayTableData.value
+const videoPlaylist = computed(() => sortedTableData.value
   .filter(row => isVideoFile(row))
   .map(row => toMediaItem(row)))
 
@@ -1156,6 +1167,58 @@ const displayTableData = computed(() => {
 
 /** 大小列排序：按原始字节数比较（文件夹无 size，视为 0） */
 const sizeSortMethod = (a, b) => Number(a.size || 0) - Number(b.size || 0)
+
+/**
+ * 名称列排序：Windows 风格「英文与汉字按拼音统一字母序混排」。
+ * 文件夹恒排在文件之前（与默认列表习惯一致），组内再按拼音键比较。
+ */
+const nameSortMethod = (a, b) => {
+  const fa = a?.isFolder ? 0 : 1
+  const fb = b?.isFolder ? 0 : 1
+  if (fa !== fb) return fa - fb
+  return compareByName(a, b)
+}
+
+/**
+ * 名称排序偏好（持久化）。
+ * 音频列表默认按名称拼音升序排列（与 Windows 文件夹一致，方便找歌），
+ * 用户点击表头切换升/降序后记住选择；其它分类默认跟随后端顺序（更新时间倒序）。
+ */
+const SORT_KEY = 'lightdisk.disk.sort'
+const readSortPref = () => {
+  try {
+    const p = JSON.parse(localStorage.getItem(SORT_KEY) || '{}')
+    return {
+      audio: p.audio === 'desc' ? 'desc' : 'asc',
+      other: p.other === 'asc' ? 'asc' : (p.other === 'desc' ? 'desc' : '')
+    }
+  } catch (e) {
+    return { audio: 'asc', other: '' }
+  }
+}
+const sortPref = reactive(readSortPref())
+
+const useNameSort = computed(() =>
+  currentCategory.value === 'audio' ? sortPref.audio !== '' : sortPref.other !== '')
+const nameSortOrder = computed(() =>
+  currentCategory.value === 'audio' ? (sortPref.audio || 'asc') : (sortPref.other || 'asc'))
+
+/** 表头点击：在「升序 / 降序 / 取消」间切换并持久化 */
+const onNameSortChange = ({ order }) => {
+  const key = currentCategory.value === 'audio' ? 'audio' : 'other'
+  if (order === 'ascending') sortPref[key] = 'asc'
+  else if (order === 'descending') sortPref[key] = 'desc'
+  else sortPref[key] = currentCategory.value === 'audio' ? 'asc' : ''
+  try { localStorage.setItem(SORT_KEY, JSON.stringify(sortPref)) } catch (e) { /* 忽略 */ }
+}
+
+/** 数据源：按偏好决定是否本地按名称排序（叠加搜索过滤） */
+const sortedTableData = computed(() => {
+  const list = displayTableData.value
+  if (!useNameSort.value) return list
+  const dir = nameSortOrder.value === 'desc' ? -1 : 1
+  return list.slice().sort((a, b) => nameSortMethod(a, b) * dir)
+})
 
 const folderTreeData = computed(() => buildFolderTree(allFolders.value))
 

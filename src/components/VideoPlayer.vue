@@ -78,94 +78,110 @@
             </div>
 
             <div class="vp-btn-row">
-              <button class="vp-icon-btn" :title="playing ? '暂停（空格）' : '播放（空格）'" @click="togglePlay">
-                <el-icon v-if="playing"><VideoPause /></el-icon>
-                <el-icon v-else><VideoPlay /></el-icon>
-              </button>
-
-              <button
-                v-if="playlist.length > 1"
-                class="vp-icon-btn"
-                title="上一个"
-                @click="switchTo(activeIndex - 1)"
-              >
-                <el-icon><DArrowLeft /></el-icon>
-              </button>
-              <button
-                v-if="playlist.length > 1"
-                class="vp-icon-btn"
-                title="下一个"
-                @click="switchTo(activeIndex + 1)"
-              >
-                <el-icon><DArrowRight /></el-icon>
-              </button>
-
-              <span class="vp-time">{{ formatDuration(currentTime) }} / {{ formatDuration(duration) }}</span>
-
-              <div class="vp-spacer"></div>
-
-              <div class="vp-volume">
-                <button class="vp-icon-btn" :title="volume > 0 ? '静音（M）' : '取消静音（M）'" @click="toggleMute">
-                  <el-icon v-if="volume > 0"><Bell /></el-icon>
-                  <el-icon v-else><MuteNotification /></el-icon>
+              <!-- 左侧：上一个 / 下一个 + 时间 -->
+              <div class="vp-left-group">
+                <button
+                  v-if="playlist.length > 1"
+                  class="vp-icon-btn"
+                  title="上一个"
+                  @click="switchTo(activeIndex - 1)"
+                >
+                  <el-icon><DArrowLeft /></el-icon>
                 </button>
-                <input
-                  class="vp-volume-range"
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  :value="volume"
-                  @input="setVolume($event.target.value)"
-                />
+                <span class="vp-time">{{ formatDuration(currentTime) }} / {{ formatDuration(duration) }}</span>
               </div>
 
-              <el-dropdown v-if="isHls && qualityOptions.length > 1" trigger="click" @command="setQuality">
-                <button class="vp-chip">{{ qualityLabel }}</button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="auto">自动</el-dropdown-item>
-                    <el-dropdown-item
-                      v-for="q in qualityOptions"
-                      :key="q.height"
-                      :command="q.height"
-                      :disabled="q.locked"
-                    >
-                      {{ q.label }}{{ q.locked ? '（会员专享）' : '' }}
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <!-- 中间：大号播放/暂停（居中并放大） -->
+              <div class="vp-center-group">
+                <button
+                  class="vp-main-btn"
+                  :title="playing ? '暂停（空格）' : '播放（空格）'"
+                  @click="togglePlay"
+                >
+                  <el-icon v-if="playing"><VideoPause /></el-icon>
+                  <el-icon v-else><VideoPlay /></el-icon>
+                </button>
+              </div>
 
-              <el-dropdown trigger="click" @command="setRate">
-                <button class="vp-chip">{{ rateLabel }}</button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item
-                      v-for="r in PLAY_RATES"
-                      :key="r"
-                      :command="r"
-                      :disabled="r > maxRate + 1e-6"
-                    >
-                      {{ r.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') }}x{{ r > maxRate + 1e-6 ? '（会员专享）' : '' }}
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <!-- 右侧：下一个 + 音量 + 清晰度 + 倍速 + 画中画 + 全屏 -->
+              <div class="vp-right-group">
+                <button
+                  v-if="playlist.length > 1"
+                  class="vp-icon-btn"
+                  title="下一个"
+                  @click="switchTo(activeIndex + 1)"
+                >
+                  <el-icon><DArrowRight /></el-icon>
+                </button>
 
-              <button
-                v-if="pipSupported"
-                class="vp-icon-btn"
-                title="画中画"
-                @click="togglePip"
-              >
-                <el-icon><CopyDocument /></el-icon>
-              </button>
+                <div class="vp-volume">
+                  <button class="vp-icon-btn" :title="volume > 0 ? '静音（M）' : '取消静音（M）'" @click="toggleMute">
+                    <el-icon v-if="volume > 0"><Bell /></el-icon>
+                    <el-icon v-else><MuteNotification /></el-icon>
+                  </button>
+                  <input
+                    class="vp-volume-range"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    :value="volume"
+                    @input="setVolume($event.target.value)"
+                  />
+                </div>
 
-              <button class="vp-icon-btn" :title="isFullscreen ? '退出全屏（F）' : '全屏（F）'" @click="toggleFullscreen">
-                <el-icon v-if="isFullscreen"><CloseBold /></el-icon>
-                <el-icon v-else><FullScreen /></el-icon>
-              </button>
+                <el-dropdown trigger="click" @command="setQuality">
+                  <button class="vp-chip" :title="qualityOptions.length > 1 ? '清晰度' : '清晰度（多档位转码中）'">
+                    {{ qualityLabel }}
+                  </button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item v-if="qualityOptions.length > 1" command="auto">自动</el-dropdown-item>
+                      <el-dropdown-item
+                        v-for="q in qualityOptions"
+                        :key="q.height"
+                        :command="q.height"
+                        :disabled="q.locked"
+                      >
+                        {{ q.label }}{{ q.locked ? '（会员专享）' : '' }}
+                      </el-dropdown-item>
+                      <el-dropdown-item v-if="qualityOptions.length <= 1" command="source" disabled>
+                        原画（多清晰度转码中…）
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+
+                <el-dropdown trigger="click" @command="setRate">
+                  <button class="vp-chip">{{ rateLabel }}</button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item
+                        v-for="r in PLAY_RATES"
+                        :key="r"
+                        :command="r"
+                        :disabled="r > maxRate + 1e-6"
+                      >
+                        {{ r.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') }}x{{ r > maxRate + 1e-6 ? '（会员专享）' : '' }}
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+
+                <button
+                  v-if="pipSupported"
+                  class="vp-icon-btn"
+                  title="画中画"
+                  @click="togglePip"
+                >
+                  <el-icon><CopyDocument /></el-icon>
+                </button>
+
+                <button class="vp-icon-btn" :title="isFullscreen ? '退出全屏（F）' : '全屏（F）'" @click="toggleFullscreen">
+                  <el-icon v-if="isFullscreen"><CloseBold /></el-icon>
+                  <el-icon v-else><FullScreen /></el-icon>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -255,6 +271,10 @@ const qualityOptions = computed(() => {
 })
 
 const qualityLabel = computed(() => {
+  if (qualityOptions.value.length <= 1) {
+    // 多档位转码尚未就绪：只有原画可看
+    return '原画'
+  }
   if (qualityMode.value === 'auto') {
     return currentQualityHeight.value ? `自动(${currentQualityHeight.value}p)` : '自动'
   }
@@ -516,6 +536,10 @@ const applyQualityPreference = () => {
 }
 
 const setQuality = async (cmd) => {
+  if (cmd === 'source') {
+    ElMessage.info('多清晰度转码完成后即可切换')
+    return
+  }
   if (!isHls.value || !current.value) {
     ElMessage.info('多清晰度尚未就绪，当前为原画质')
     return
@@ -1051,6 +1075,57 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* 三栏布局：左信息 / 中主按钮 / 右功能，主播放键始终水平居中 */
+.vp-left-group {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vp-center-group {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+}
+
+.vp-right-group {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 居中的大号播放/暂停按钮 */
+.vp-main-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  cursor: pointer;
+  font-size: 30px;
+  transition: background-color 0.18s ease, transform 0.18s ease;
+}
+
+.vp-main-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
+  transform: scale(1.06);
+}
+
+.vp-main-btn:active {
+  transform: scale(0.96);
 }
 
 .vp-spacer {

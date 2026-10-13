@@ -184,6 +184,9 @@ import { QoeReporter } from '@/utils/qoe'
 
 const player = usePlayerStore()
 
+/** 当前曲目的流地址（判断 <audio> 是否已切到新源，避免在旧源上 play） */
+const currentUrl = computed(() => player.currentTrack?.url || '')
+
 const audioEl = ref(null)
 const progressEl = ref(null)
 const dragging = ref(false)
@@ -351,11 +354,32 @@ const loopIcon = computed(() => {
   return '顺序'
 })
 
+/**
+ * 统一应用倍速到 <audio>。
+ *
+ * 关键点（修复「进度条走快了但听感仍是 1 倍速」）：
+ *  1. 同时写 playbackRate 与 defaultPlaybackRate —— 后者决定换源/重载后的初始速率，
+ *     只写 playbackRate 时新曲目加载完会回到 1.0（表现为「只有进度条快」）。
+ *  2. preservesPitch 必须显式设为 true，否则 Chromium 默认会变调；
+ *     部分内核需用带前缀的属性名。
+ */
+const applyRate = () => {
+  const el = audioEl.value
+  if (!el) return
+  const val = Number(player.rate) || 1
+  el.defaultPlaybackRate = val
+  el.playbackRate = val
+  if ('preservesPitch' in el) el.preservesPitch = true
+  else if ('mozPreservesPitch' in el) el.mozPreservesPitch = true
+  else if ('webkitPreservesPitch' in el) el.webkitPreservesPitch = true
+}
+
 // 曲目切换：:src 绑定会自动触发浏览器重新加载，这里只需同步播放状态
 // （此前手动 load() 会 abort 掉播放 promise，把 AbortError 误判成自动播放拦截）
 watch(() => player.currentTrack?.url, () => {
   nextTick(() => {
     buffered.value = 0
+    applyRate()
     syncPlayback()
   })
 })
@@ -363,13 +387,22 @@ watch(() => player.currentTrack?.url, () => {
 // 播放/暂停状态同步
 watch(() => player.playing, () => syncPlayback())
 
-// reloadToken：单曲循环 / 重播 / 上一首回到开头
+// reloadToken：单曲循环 / 重播 / 上一首回到开头。
+// 关键：只在「同一首曲子」内生效；换曲时 URL 绑定已负责重载，
+// 这里再 play 一次会与 :src 更新竞态（大列表下表现为点了单曲不播）。
 watch(() => player.reloadToken, () => {
   const el = audioEl.value
   if (!el) return
+  const srcMatches = el.currentSrc && currentUrl.value && el.currentSrc.indexOf(currentUrl.value) !== -1
+  if (!srcMatches) {
+    // src 尚未切换到新曲目，交给 url watcher 处理，避免在旧源上 play 导致 AbortError
+    nextTick(() => { applyRate(); syncPlayback() })
+    return
+  }
   try {
     el.currentTime = 0
   } catch (e) { /* 元数据未就绪时忽略 */ }
+  applyRate()
   syncPlayback()
 })
 
@@ -379,14 +412,7 @@ watch(() => player.volume, (val) => {
 })
 
 // 倍速：preservesPitch 保持音调，避免变成「花栗鼠音」
-watch(() => player.rate, (val) => {
-  const el = audioEl.value
-  if (!el) return
-  el.playbackRate = val
-  if ('preservesPitch' in el) el.preservesPitch = true
-  else if ('mozPreservesPitch' in el) el.mozPreservesPitch = true
-  else if ('webkitPreservesPitch' in el) el.webkitPreservesPitch = true
-}, { immediate: true })
+watch(() => player.rate, () => applyRate(), { immediate: true })
 
 // 外部（进度条）改写播放位置时同步到元素
 watch(() => player.currentTime, (val) => {
@@ -431,14 +457,17 @@ const onLoadedMetadata = () => {
   if (!el) return
   player.duration = Number.isFinite(el.duration) ? el.duration : 0
   el.volume = player.volume
-  el.playbackRate = player.rate
-  if ('preservesPitch' in el) el.preservesPitch = true
+  // 新曲目元数据就绪后必须重新写一次倍速：
+  // 换源会重置元素的 playbackRate/defaultPlaybackRate，只靠 store 的 watch 不够
+  applyRate()
   // 元数据就绪即认为首帧可用，记一次首帧耗时
   if (qoe) qoe.markFirstFrame()
 }
 
 // ===== 媒体事件（QoE 采集 + 频谱启停）=====
 const onPlaying = () => {
+  // 兜底：部分内核在 play 时会重置 playbackRate，这里再对齐一次
+  applyRate()
   if (qoe) {
     qoe.markFirstFrame()
     qoe.markPlaying()
