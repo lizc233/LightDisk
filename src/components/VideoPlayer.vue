@@ -130,7 +130,12 @@
                   />
                 </div>
 
-                <el-dropdown trigger="click" @command="setQuality">
+                <el-dropdown
+                  trigger="click"
+                  popper-class="vp-popper"
+                  @command="setQuality"
+                  @visible-change="onDropdownVisible"
+                >
                   <button class="vp-chip" :title="qualityOptions.length > 1 ? '清晰度' : '清晰度（多档位转码中）'">
                     {{ qualityLabel }}
                   </button>
@@ -152,7 +157,12 @@
                   </template>
                 </el-dropdown>
 
-                <el-dropdown trigger="click" @command="setRate">
+                <el-dropdown
+                  trigger="click"
+                  popper-class="vp-popper"
+                  @command="setRate"
+                  @visible-change="onDropdownVisible"
+                >
                   <button class="vp-chip">{{ rateLabel }}</button>
                   <template #dropdown>
                     <el-dropdown-menu>
@@ -853,6 +863,19 @@ const scheduleHide = () => {
   }, 3000)
 }
 
+/**
+ * 清晰度/倍速下拉展开期间保持控制条常显。
+ * 菜单 teleport 到 body，控制条若按时隐藏，chip 消失但菜单还悬着，观感如同「无响应」。
+ */
+const onDropdownVisible = (show) => {
+  if (show) {
+    controlsVisible.value = true
+    clearTimeout(hideTimer)
+  } else {
+    scheduleHide()
+  }
+}
+
 const onBackdropClick = () => {
   // 点击空白区域不关闭，避免误触丢失观看进度
   scheduleHide()
@@ -974,6 +997,14 @@ onBeforeUnmount(() => {
   teardownPlayback()
 })
 </script>
+
+<!-- 非 scoped：下拉菜单 teleport 到 body，必须在全局样式里压过 .vp-mask 的 z-index:3000，
+     否则「清晰度 / 倍速」菜单被遮罩盖住，点击后看似无反应 -->
+<style>
+.vp-popper.el-popper {
+  z-index: 3200 !important;
+}
+</style>
 
 <style scoped>
 .vp-mask {

@@ -139,6 +139,8 @@ const loadPos = () => {
 const customPos = ref(loadPos())
 const dragging = ref(false)
 const hasCustomPos = computed(() => !!customPos.value)
+/** 视口高度（resize 时刷新），用于把 FAB 位置换算成 dock 的 bottom */
+const viewportH = ref(window.innerHeight)
 
 /** 依位置计算面板向上/向左展开方向，避免超出视口 */
 const flippedX = computed(() => {
@@ -152,9 +154,20 @@ const flippedY = computed(() => {
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 
+/**
+ * customPos 始终表示「FAB 左上角」在视口中的位置。
+ * dock 用 left + bottom 定位（而不是 left + top）：
+ * 面板展开时 dock 向上生长，FAB 位置保持不变，
+ * 否则拖动时 FAB 会按面板高度整体跳位、甚至被顶出视口。
+ */
 const dockStyle = computed(() => {
   if (!customPos.value) return {}
-  return { left: `${customPos.value.left}px`, top: `${customPos.value.top}px`, right: 'auto', bottom: 'auto' }
+  return {
+    left: `${customPos.value.left}px`,
+    right: 'auto',
+    top: 'auto',
+    bottom: `${Math.max(0, viewportH.value - customPos.value.top - FAB_SIZE)}px`
+  }
 })
 
 let startX = 0
@@ -224,6 +237,7 @@ const onFabClick = () => {
 
 // 窗口缩放时把浮动图标拉回可视区域内
 const onResize = () => {
+  viewportH.value = window.innerHeight
   if (!customPos.value) return
   const maxLeft = window.innerWidth - FAB_SIZE - MARGIN
   const maxTop = window.innerHeight - FAB_SIZE - MARGIN
@@ -352,6 +366,12 @@ const statusText = (task) => {
 }
 
 .tp-panel {
+  /* 绝对定位挂在 FAB 上方，不参与 dock 布局：
+     否则 400px 宽的面板会把 dock 撑宽，FAB（align-self:flex-end）被挤到
+     「锚点 + 352px」处，拖动时位置语义错乱、一拖就漂出视口 */
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
   width: 400px;
   max-height: 460px;
   display: flex;
@@ -363,18 +383,16 @@ const statusText = (task) => {
   overflow: hidden;
 }
 
-/* 图标拖到左侧时面板靠左对齐，避免超出右边界 */
-.transfer-dock:not(.docked) .tp-panel.flip-x {
-  align-self: flex-start;
+/* 图标拖到左侧时面板靠左对齐，避免超出左边界 */
+.transfer-dock .tp-panel.flip-x {
+  right: auto;
+  left: 0;
 }
 
-/* 图标拖到上方时面板向下展开（放在 FAB 下方），避免超出顶部 */
-.transfer-dock:not(.docked) .tp-panel.flip-y {
-  order: 2;
-}
-
-.transfer-dock:not(.docked) .tp-fab.flip-y-anchor {
-  order: 1;
+/* 图标拖到上方时面板向下展开（挂在 FAB 下方），避免超出顶部 */
+.transfer-dock .tp-panel.flip-y {
+  bottom: auto;
+  top: calc(100% + 10px);
 }
 
 .tp-head {
