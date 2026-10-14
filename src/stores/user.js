@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { usePlayerStore } from '@/stores/player'
+import { clearUploadQueue } from '@/utils/uploadQueue'
 
 /** 播放器持久化键前缀（实际键为 lightdisk.player.state.<userId>） */
 const PLAYER_STATE_PREFIX = 'lightdisk.player.state'
@@ -50,6 +51,8 @@ export const useUserStore = defineStore('user', () => {
 
   const logout = () => {
     resetPlayerState()
+    // 排队中的上传属于上一个登录态，登出后继续跑只会拿到 401
+    try { clearUploadQueue() } catch (e) {}
     token.value = ''
     userInfo.value = {}
     localStorage.removeItem('token')

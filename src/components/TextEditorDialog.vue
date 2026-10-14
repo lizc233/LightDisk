@@ -198,7 +198,9 @@ let editorView = null
 const shortMd5 = computed(() => (baseMd5.value ? baseMd5.value.slice(0, 8) : '-'))
 const editorTitle = computed(() => (editable.value ? '编辑' : '查看'))
 
-const currentText = () => (editorView ? editorView.state.doc.toString() : '')
+/** 已加载的原文：编辑器还没挂载（或挂载失败）时，预览用它兜底，避免右侧空白 */
+const loadedContent = ref('')
+const currentText = () => (editorView ? editorView.state.doc.toString() : loadedContent.value)
 
 const langExtension = (ext) => {
   if (ext === 'md' || ext === 'markdown') return markdown()
@@ -232,11 +234,15 @@ const loadContent = async () => {
     reason.value = data.reason || ''
     baseMd5.value = data.md5 || ''
     fileExt.value = data.ext || ''
+    loadedContent.value = data.content || ''
     // 关键：先关掉 loading 让 v-else 里的 editor-host 真正挂载，再创建 CodeMirror，
     // 否则 editorHost 还是 null，编辑器根本不会创建（表现为打开后一片空白）
     loading.value = false
     await nextTick()
     createEditor(data.content || '', editable.value, data.ext || '')
+    // 编辑器创建完不会触发 docChanged，必须手动让预览重算一次，
+    // 否则 Markdown 预览会一直停留在「打开时的空值」，直到用户敲下第一个字
+    docVersion.value++
     csvView.value = data.ext === 'csv' ? 'table' : 'source'
     refreshCsv()
   } catch (e) {
@@ -283,6 +289,7 @@ const handleSave = async () => {
       editorType: 0
     })
     baseMd5.value = res.data || baseMd5.value
+    loadedContent.value = content
     dirty.value = false
     refreshCsv()
     ElMessage.success('保存成功，已生成历史版本')

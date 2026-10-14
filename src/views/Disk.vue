@@ -649,6 +649,7 @@ import { useUserStore } from '@/stores/user'
 import { usePreferencesStore } from '@/stores/preferences'
 import { useTransferStore } from '@/stores/transfer'
 import { CHUNK_THRESHOLD, ChunkUploader, isAbortError, uploadSmallFile } from '@/utils/uploader'
+import { MAX_CONCURRENT_UPLOADS, dropQueuedUpload, scheduleUpload } from '@/utils/uploadQueue'
 import { downloadWithProgress, pickSaveHandle, supportsFileSystemAccess } from '@/utils/downloader'
 import TextEditorDialog from '@/components/TextEditorDialog.vue'
 import OfficePreviewDialog from '@/components/OfficePreviewDialog.vue'
@@ -1771,7 +1772,9 @@ const handleFileUpload = (event) => {
 
 /**
  * 上传入口：每个文件建一条传输任务，并立刻把浮层打开让用户看到进度。
- * 小文件直传，大文件走「分片 + 断点续传 + 秒传」链路。
+ *
+ * 任务不会同时全部开跑 —— 交给 uploadQueue 排队，最多 3 个并发，
+ * 避免一次拖入 10+ 个文件时把连接数打满导致成片失败（云端网关尤其明显）。
  */
 const uploadFiles = (files) => {
   const owner = uploaderOwnerId()
@@ -1787,15 +1790,39 @@ const uploadFiles = (files) => {
       size: file.size,
       pausable: chunky
     })
-    runUpload(file, task.id)
+    // 排队阶段被取消：直接从队列里摘掉，别等轮到它再跑
+    transferStore.registerControl(task.id, { cancel: () => dropQueuedUpload(task.id) })
+    scheduleUpload({ taskId: task.id, start: () => runUpload(file, task.id) })
   })
   transferStore.panelVisible = true
   if (files.length > 1) {
-    ElMessage.info(`已加入上传队列：${files.length} 个文件`)
+    ElMessage.info(`已加入上传队列：${files.length} 个文件（最多同时上传 ${MAX_CONCURRENT_UPLOADS} 个）`)
   }
 }
 
-const runUpload = async (file, taskId) => {
+/** 失败自动重试：只针对传输层错误（网络中断 / 5xx / 被网关掐断），业务错误不重试 */
+const AUTO_RETRY_LIMIT = 2
+const AUTO_RETRY_DELAY = 2500
+
+const shouldAutoRetry = (error) => {
+  if (!error || !error.isAxiosError) return false
+  if (isAbortError(error)) return false
+  const status = error.response?.status
+  if (status === 401 || status === 403) return false
+  return true
+}
+
+/** 手动重试也走队列，避免一口气点一堆重试又把并发打满 */
+const enqueueRetry = (file, taskId) => {
+  transferStore.patchTask(taskId, { status: 'waiting', loaded: 0, error: '', speed: 0 })
+  transferStore.registerControl(taskId, { cancel: () => dropQueuedUpload(taskId) })
+  scheduleUpload({ taskId, start: () => runUpload(file, taskId) })
+}
+
+const runUpload = async (file, taskId, attempt = 0) => {
+  const task = transferStore.tasks.find(t => t.id === taskId)
+  // 排队期间被取消 / 被移出列表：不再执行
+  if (!task || task.status === 'canceled') return
   const useChunk = file.size >= CHUNK_THRESHOLD && preferencesStore.enableChunkUpload
   transferStore.patchTask(taskId, { status: 'running', loaded: 0, error: '', phase: '', speed: 0, finishedAt: null })
   const onProgress = (loaded) => transferStore.reportProgress(taskId, loaded)
@@ -1810,7 +1837,7 @@ const runUpload = async (file, taskId) => {
       })
       transferStore.registerControl(taskId, {
         cancel: () => abort(),
-        retry: () => runUpload(file, taskId)
+        retry: () => enqueueRetry(file, taskId)
       })
       result = await promise
     } else {
@@ -1836,7 +1863,7 @@ const runUpload = async (file, taskId) => {
         pause: () => uploader.pause(),
         resume: () => uploader.resume(),
         cancel: () => uploader.cancel(),
-        retry: () => runUpload(file, taskId)
+        retry: () => enqueueRetry(file, taskId)
       })
       result = await uploader.start()
     }
@@ -1852,6 +1879,22 @@ const runUpload = async (file, taskId) => {
   } catch (error) {
     if (isAbortError(error)) return
     console.error('上传失败:', error)
+    // 传输层错误：自动排队重试，不需要用户手动点
+    if (shouldAutoRetry(error) && attempt < AUTO_RETRY_LIMIT) {
+      const next = attempt + 1
+      transferStore.patchTask(taskId, {
+        status: 'waiting',
+        speed: 0,
+        error: `上传失败，${Math.round(AUTO_RETRY_DELAY / 1000)} 秒后自动重试（第 ${next}/${AUTO_RETRY_LIMIT} 次）`
+      })
+      setTimeout(() => {
+        const current = transferStore.tasks.find(t => t.id === taskId)
+        if (!current || current.status === 'canceled') return
+        if (!userStore.token) return
+        scheduleUpload({ taskId, start: () => runUpload(file, taskId, next) })
+      }, AUTO_RETRY_DELAY)
+      return
+    }
     transferStore.failTask(taskId, (error && error.message) || '上传失败')
   }
 }

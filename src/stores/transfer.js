@@ -252,8 +252,14 @@ export const useTransferStore = defineStore('transfer', () => {
     persist()
   }
 
+  /**
+   * 「清除已完成」：只清掉真正结束的（成功 / 已取消 / 从列表移除的下载）。
+   *
+   * 刻意保留 status === 'error' 的失败项 —— 它们还需要重试，之前被一起清掉，
+   * 用户会觉得「点一下就没了，没传上去的文件也找不回来了」。
+   */
   const clearFinished = () => {
-    tasks.value = tasks.value.filter(t => ACTIVE_STATUSES.includes(t.status))
+    tasks.value = tasks.value.filter(t => ACTIVE_STATUSES.includes(t.status) || t.status === 'error')
     persist()
   }
 

@@ -664,7 +664,9 @@ const handleResetPassword = async () => {
 const handleUpgradeVip = async () => {
   upgradingVip.value = true
   try {
-    const res = await request.post('/user/vip/upgrade')
+    // 显式带一个 JSON body：部分反向代理（如 Cloud Studio 预览网关）对
+    // 「无 Content-Type 的空 body POST」会直接返回 404，导致接口根本没到后端
+    const res = await request.post('/user/vip/upgrade', {})
     profile.value = {
       ...profile.value,
       ...res.data

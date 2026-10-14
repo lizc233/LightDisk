@@ -13,7 +13,7 @@
             <span v-if="store.runningCount" class="tp-speed">{{ formatBytes(store.totalSpeed) }}/s</span>
           </div>
           <div class="tp-head-actions">
-            <button v-if="store.finishedTasks.length" class="tp-text-btn" @click="store.clearFinished()">
+            <button v-if="clearableCount" class="tp-text-btn" @click="store.clearFinished()">
               清除已完成
             </button>
             <button class="tp-icon-btn" title="收起" @click="store.panelVisible = false">
@@ -261,8 +261,12 @@ const percent = (task) => {
   return Math.min(100, Math.round((task.loaded / task.size) * 100))
 }
 
+/** 只有「已完成 / 已取消」才可清除；失败项要留给用户重试 */
+const clearableCount = computed(() =>
+  store.tasks.filter(t => t.status === 'success' || t.status === 'canceled').length)
+
 const STATUS_LABEL = {
-  waiting: '等待中',
+  waiting: '排队中',
   paused: '已暂停',
   canceled: '已取消'
 }
@@ -279,6 +283,10 @@ const statusText = (task) => {
   }
   if (task.status === 'error') {
     return task.error || '传输失败'
+  }
+  // 排队中若有说明（例如「X 秒后自动重试」），优先展示，让用户知道系统在自愈
+  if (task.status === 'waiting' && task.error) {
+    return task.error
   }
   return STATUS_LABEL[task.status] || ''
 }
