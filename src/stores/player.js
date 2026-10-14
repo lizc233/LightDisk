@@ -2,7 +2,25 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { buildAudioCoverUrl } from '@/api/audio'
 
-const STORAGE_KEY = 'lightdisk.player.state'
+const STORAGE_PREFIX = 'lightdisk.player.state'
+
+/**
+ * 播放列表按用户隔离存储。
+ *
+ * 换账号后若沿用上一个账号的歌单，<audio>/<img> 会带着当前 token 去请求「别人的」fileId，
+ * 后端抛「无权访问此文件」→ 播放器不断触发 onError 报错。
+ * 所以状态键跟随当前登录用户的 id，换账号天然读不到旧歌单。
+ */
+const readUid = () => {
+  try {
+    const info = JSON.parse(localStorage.getItem('userInfo') || '{}')
+    return info && info.id != null ? String(info.id) : 'anon'
+  } catch (e) {
+    return 'anon'
+  }
+}
+
+const storageKey = () => `${STORAGE_PREFIX}.${readUid()}`
 
 const readToken = () => localStorage.getItem('token') || localStorage.getItem('satoken') || ''
 
@@ -32,7 +50,7 @@ export const LOOP_MODES = [
 
 const readSaved = () => {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}') || {}
+    return JSON.parse(localStorage.getItem(storageKey()) || '{}') || {}
   } catch (e) {
     return {}
   }
@@ -77,7 +95,7 @@ export const usePlayerStore = defineStore('player', () => {
   const fullListBeforeSingle = ref(null)
 
   const persist = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    localStorage.setItem(storageKey(), JSON.stringify({
       // url/coverUrl 内嵌 token，有效期只有 2 小时，不入库；恢复时按当前 token 现算
       playList: playList.value.map(({ url, coverUrl, ...rest }) => rest),
       currentIndex: currentIndex.value,
