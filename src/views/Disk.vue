@@ -110,15 +110,15 @@
           <el-icon><Select /></el-icon>
           <span>{{ batchMode ? '退出批量' : '批量下载' }}</span>
         </div>
-        <!-- 一键入队：当前视图（文件夹 / 音频分类 / 搜索）下所有音频一次性加入播放列表 -->
+        <!-- 一键入队：当前范围（文件夹 / 音频分类 / 收藏 / 标签）下「全部」音频入队，跨分页 -->
         <div
-          v-if="audioTracks.length"
+          v-if="audioTracks.length || currentCategory === 'audio'"
           class="action-tile light"
-          :title="`把当前列表里的 ${audioTracks.length} 个音频全部加入播放列表`"
+          title="把当前范围内的全部音频加入播放列表（含其它分页）"
           @click="playAllAudio"
         >
           <el-icon><Headset /></el-icon>
-          <span>播放全部（{{ audioTracks.length }}）</span>
+          <span>{{ playingAll ? '正在载入…' : '播放全部' }}</span>
         </div>
       </div>
 
@@ -658,7 +658,6 @@ import VideoPlayer from '@/components/VideoPlayer.vue'
 import { usePlayerStore, AUDIO_EXTS } from '@/stores/player'
 import { buildAudioCoverUrl } from '@/api/audio'
 import { formatBytes, fileExt } from '@/utils/format'
-import { compareByName } from '@/utils/pinyinSort'
 import {
   ArrowRight,
   Clock,
@@ -952,12 +951,17 @@ const toMediaItem = (row) => ({
 })
 
 /**
- * 当前列表里的音频 → 播放条队列（决定「上一首 / 下一首」的范围）。
- * 直接采样 sortedTableData，与列表显示顺序（默认按名称拼音混排）保持一致。
+ * 当前「页」里的音频 → 单曲播放时的队列上下文。
+ * 点单首播放时以这一页为上下文（列表与队列顺序一致）；「播放全部」则会
+ * 另行拉取当前范围内的全部音频，见 playAllAudio。
  */
 const audioTracks = computed(() => sortedTableData.value
   .filter(row => isAudioFile(row))
   .map(row => toMediaItem(row)))
+
+/** 「播放全部」单次拉取的最大条数（覆盖当前范围内的全部音频） */
+const PLAY_ALL_LIMIT = 2000
+const playingAll = ref(false)
 
 /** 当前列表里的视频 → 播放器内可左右切换 */
 const videoPlaylist = computed(() => sortedTableData.value
@@ -971,17 +975,54 @@ const playAudio = (row) => {
 }
 
 /**
- * 一键入队：把当前视图里的音频整体加入播放列表并从第一首开始播放。
- * 范围由 audioTracks 决定 —— 即「当前文件夹 / 当前音频分类 / 当前搜索结果」。
+ * 一键入队：把「当前范围」内的音频**整体**加入播放列表并从第一首开始播放。
+ *
+ * 这里是「全部」而不是「这一页」：列表分页只是展示手段，用户点「播放全部」时
+ * 期望的是当前条件下（音频分类 / 当前文件夹 / 收藏 / 标签）的所有歌，
+ * 只放当前页的 20 首会让人以为歌丢了。所以按同样的筛选条件再拉一次全量音频。
+ * （处于搜索结果里时以页面实际命中的结果为准。）
  */
-const playAllAudio = () => {
-  const list = audioTracks.value
-  if (!list.length) {
-    ElMessage.info('当前列表没有音频文件')
+const playAllAudio = async () => {
+  if (playingAll.value) return
+  if (searchQuery.value.trim()) {
+    const list = audioTracks.value
+    if (!list.length) {
+      ElMessage.info('当前列表没有音频文件')
+      return
+    }
+    playerStore.playFromList(list, 0)
+    ElMessage.success(`已加入播放列表 ${list.length} 首`)
     return
   }
-  playerStore.playFromList(list, 0)
-  ElMessage.success(`已加入播放列表 ${list.length} 首`)
+
+  playingAll.value = true
+  try {
+    const res = await request.post('/file/list', {
+      ...currentScopeParams(),
+      pageNum: 1,
+      pageSize: PLAY_ALL_LIMIT,
+      ...currentSortParams()
+    }, { silent: true })
+    const list = (res.data.records || []).map(toRow).filter(isAudioFile).map(toMediaItem)
+    if (!list.length) {
+      ElMessage.info('当前范围没有音频文件')
+      return
+    }
+    playerStore.playFromList(list, 0)
+    ElMessage.success(`已加入播放列表 ${list.length} 首`)
+  } catch (error) {
+    console.error('获取音频列表失败:', error)
+    // 兜底：退回到当前页可见的音频，至少让用户能听上
+    const list = audioTracks.value
+    if (list.length) {
+      playerStore.playFromList(list, 0)
+      ElMessage.success(`已加入播放列表 ${list.length} 首`)
+    } else {
+      ElMessage.error('获取音频列表失败')
+    }
+  } finally {
+    playingAll.value = false
+  }
 }
 
 /** 单首入队（不打断当前播放）：右键菜单用 */
@@ -1205,17 +1246,6 @@ const displayTableData = computed(() => {
 const sizeSortMethod = (a, b) => Number(a.size || 0) - Number(b.size || 0)
 
 /**
- * 名称列排序：Windows 风格「英文与汉字按拼音统一字母序混排」。
- * 文件夹恒排在文件之前（与默认列表习惯一致），组内再按拼音键比较。
- */
-const nameSortMethod = (a, b) => {
-  const fa = a?.isFolder ? 0 : 1
-  const fb = b?.isFolder ? 0 : 1
-  if (fa !== fb) return fa - fb
-  return compareByName(a, b)
-}
-
-/**
  * 名称排序偏好（持久化）。
  * 音频列表默认按名称拼音升序排列（与 Windows 文件夹一致，方便找歌），
  * 用户点击表头切换升/降序后记住选择；其它分类默认跟随后端顺序（更新时间倒序）。
@@ -1239,22 +1269,27 @@ const useNameSort = computed(() =>
 const nameSortOrder = computed(() =>
   currentCategory.value === 'audio' ? (sortPref.audio || 'asc') : (sortPref.other || 'asc'))
 
-/** 表头点击：在「升序 / 降序 / 取消」间切换并持久化 */
-const onNameSortChange = ({ order }) => {
+/**
+ * 表头点击：在「升序 / 降序 / 取消」间切换并持久化。
+ * 排序由后端执行，改动后必须重新拉取列表（并且回到第 1 页 —— 排序变了，页内容全变）。
+ */
+const onNameSortChange = async ({ order }) => {
   const key = currentCategory.value === 'audio' ? 'audio' : 'other'
   if (order === 'ascending') sortPref[key] = 'asc'
   else if (order === 'descending') sortPref[key] = 'desc'
   else sortPref[key] = currentCategory.value === 'audio' ? 'asc' : ''
   try { localStorage.setItem(SORT_KEY, JSON.stringify(sortPref)) } catch (e) { /* 忽略 */ }
+  currentPage.value = 1
+  await loadFileList()
 }
 
-/** 数据源：按偏好决定是否本地按名称排序（叠加搜索过滤） */
-const sortedTableData = computed(() => {
-  const list = displayTableData.value
-  if (!useNameSort.value) return list
-  const dir = nameSortOrder.value === 'desc' ? -1 : 1
-  return list.slice().sort((a, b) => nameSortMethod(a, b) * dir)
-})
+/**
+ * 数据源：只做前端搜索过滤。
+ *
+ * 排序已由后端在「全量数据」上完成（见 FileService#applySort）—— 这里若再排一次，
+ * 就又退化成「只排当前页」，跨页顺序依旧错乱。
+ */
+const sortedTableData = computed(() => displayTableData.value)
 
 const folderTreeData = computed(() => buildFolderTree(allFolders.value))
 
@@ -1311,33 +1346,56 @@ const loadFolderCatalog = async () => {
   }
 }
 
+/** 后端列表项 → 页面行结构（文件与文件夹可能同 id，用前缀拼出稳定且唯一的选择键） */
+const toRow = (item) => ({
+  id: item.id,
+  key: (item.type === 'folder' ? 'd' : 'f') + item.id,
+  name: item.name,
+  type: item.type,
+  size: item.size,
+  ext: item.ext,
+  date: formatTime(item.updateTime),
+  isFavorite: item.isFavorite === 1,
+  tags: item.tags || [],
+  isFolder: item.type === 'folder'
+})
+
+/**
+ * 「当前视图」共用的筛选条件（文件夹 / 分类 / 最近 / 收藏 / 标签）。
+ * 列表与「播放全部」都用它，避免两者范围对不上。
+ */
+const currentScopeParams = () => {
+  const tagFilterKey = activeFilterKey.value.startsWith('tag:') ? activeFilterKey.value : ''
+  return {
+    folderId: currentFolderId.value,
+    category: currentCategory.value,
+    isRecent: isRecentMode.value,
+    favorite: activeFilterKey.value === 'fav' || undefined,
+    tagId: tagFilterKey ? Number(tagFilterKey.slice(4)) : undefined
+  }
+}
+
+/**
+ * 排序参数下推到后端。
+ *
+ * 分页是后端「全量分页」，排序也必须由后端在全量数据上完成 —— 只排当前页的话，
+ * 按名称升序时第一页永远看不到本该排最前的那些文件（例如早上传的 A 会被挤到第 2 页）。
+ */
+const currentSortParams = () => (useNameSort.value
+  ? { sortBy: 'name', sortOrder: nameSortOrder.value }
+  : {})
+
 const loadFileList = async () => {
   try {
-    const tagFilterKey = activeFilterKey.value.startsWith('tag:') ? activeFilterKey.value : ''
     const res = await request.post('/file/list', {
-      folderId: currentFolderId.value,
+      ...currentScopeParams(),
       pageNum: currentPage.value,
       pageSize: pageSize.value,
-      category: currentCategory.value,
-      isRecent: isRecentMode.value,
-      favorite: activeFilterKey.value === 'fav' || undefined,
-      tagId: tagFilterKey ? Number(tagFilterKey.slice(4)) : undefined
+      ...currentSortParams()
     })
 
     total.value = res.data.total
-    tableData.value = (res.data.records || []).map(item => ({
-      id: item.id,
-      // 文件与文件夹可能同 id，用前缀拼出稳定且唯一的选择键
-      key: (item.type === 'folder' ? 'd' : 'f') + item.id,
-      name: item.name,
-      type: item.type,
-      size: item.size,
-      ext: item.ext,
-      date: formatTime(item.updateTime),
-      isFavorite: item.isFavorite === 1,
-      tags: item.tags || [],
-      isFolder: item.type === 'folder'
-    }))
+    tableData.value = (res.data.records || []).map(toRow)
   } catch (error) {
     console.error('加载文件列表失败:', error)
   }

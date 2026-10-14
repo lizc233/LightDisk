@@ -79,9 +79,17 @@
               <span class="label">剩余空间</span>
               <span class="value">{{ formattedFree }}</span>
             </div>
-            <el-button type="primary" class="upgrade-btn" round @click="upgradeDialogVisible = true">
+            <!-- 已是最高等级时后端会拒绝升级，这里同步禁用入口，避免点了才发现 -->
+            <el-button
+              type="primary"
+              class="upgrade-btn"
+              round
+              :disabled="!!profile.isMaxLevel"
+              :title="profile.isMaxLevel ? `当前已是最高等级（${profile.levelName || ''}）` : ''"
+              @click="upgradeDialogVisible = true"
+            >
               <el-icon><Top /></el-icon>
-              提升等级 / 扩容
+              {{ profile.isMaxLevel ? '已是最高等级' : '提升等级 / 扩容' }}
             </el-button>
           </div>
         </div>
