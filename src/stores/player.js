@@ -53,6 +53,12 @@ export const usePlayerStore = defineStore('player', () => {
 
   const hasTrack = computed(() => !!currentTrack.value)
 
+  /**
+   * 记住「切换循环模式前的完整播放列表」，用于从单曲循环切回顺序/随机时恢复整份队列。
+   * 单曲循环会把列表收敛成本歌一首，这个备份保证可逆。
+   */
+  const fullListBeforeSingle = ref(null)
+
   const persist = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       playList: playList.value,
@@ -68,8 +74,16 @@ export const usePlayerStore = defineStore('player', () => {
   /** 用「当前列表 + 起始位置」开播（例如在音频分类里点第一首） */
   const playFromList = (list, index = 0) => {
     if (!Array.isArray(list) || !list.length) return
-    playList.value = list.slice()
-    currentIndex.value = Math.max(0, Math.min(index, list.length - 1))
+    if (loopMode.value === 'single') {
+      // 单曲循环语义：整列表只作为「候选池」备份，实际只播起始那一首
+      const start = Math.max(0, Math.min(index, list.length - 1))
+      fullListBeforeSingle.value = list.slice()
+      playList.value = [list[start]]
+      currentIndex.value = 0
+    } else {
+      playList.value = list.slice()
+      currentIndex.value = Math.max(0, Math.min(index, list.length - 1))
+    }
     currentTime.value = 0
     duration.value = 0
     playing.value = true
@@ -85,6 +99,17 @@ export const usePlayerStore = defineStore('player', () => {
     if (!track) return
     const useExternalList = Array.isArray(list) && list.length > 0
     if (useExternalList) {
+      // 单曲循环语义下：无论从哪个列表点歌，都只把这首留下来播
+      if (loopMode.value === 'single') {
+        fullListBeforeSingle.value = list.slice()
+        playList.value = [track]
+        currentIndex.value = 0
+        currentTime.value = 0
+        duration.value = 0
+        playing.value = true
+        reloadToken.value += 1
+        return
+      }
       playList.value = list.slice()
     }
     const idx = playList.value.findIndex(t => t.key === track.key)
@@ -181,8 +206,39 @@ export const usePlayerStore = defineStore('player', () => {
     rate.value = PLAY_RATES.includes(Number(value)) ? Number(value) : 1
   }
 
+  /**
+   * 切换循环模式。
+   *
+   * 关键修复（大列表下「单曲循环」实际跳到别的歌）：
+   * next(true) 依赖 currentIndex 定位，而列表项以 key 去重 —— 同一个音频在
+   * 不同排序/分组下 key 可能重复，导致下标错位、单曲循环定位到别的曲目。
+   * 这里采纳「语义化列表」方案：
+   *   - 切到 single：备份完整列表，然后只保留当前曲目（列表长度 1，next 必然回到本歌）
+   *   - 切回 order/random：用备份恢复完整列表，并把 currentIndex 重新定位到当前曲目
+   */
   const setLoopMode = (mode) => {
-    loopMode.value = LOOP_MODES.some(m => m.value === mode) ? mode : 'order'
+    const next = LOOP_MODES.some(m => m.value === mode) ? mode : 'order'
+    const prevMode = loopMode.value
+    if (next === prevMode) return
+
+    if (next === 'single') {
+      const track = currentTrack.value
+      if (track && playList.value.length > 1) {
+        fullListBeforeSingle.value = playList.value.slice()
+        playList.value = [track]
+        currentIndex.value = 0
+      }
+    } else if (prevMode === 'single' && fullListBeforeSingle.value && fullListBeforeSingle.value.length) {
+      const track = currentTrack.value
+      const restored = fullListBeforeSingle.value.slice()
+      const idx = track ? restored.findIndex(t => t.key === track.key) : -1
+      // 若本歌已不在备份列表中（例如列表被清空过），把本歌补回去
+      if (idx < 0 && track) restored.push(track)
+      playList.value = restored
+      currentIndex.value = idx >= 0 ? idx : restored.length - 1
+      fullListBeforeSingle.value = null
+    }
+    loopMode.value = next
   }
 
   const removeAt = (index) => {

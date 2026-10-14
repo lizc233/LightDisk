@@ -167,6 +167,8 @@ let pointerId = null
 const onFabPointerDown = (evt) => {
   // 右键 / 非主键忽略
   if (evt.button !== undefined && evt.button !== 0) return
+  evt.preventDefault()
+  evt.stopPropagation()
   const el = evt.currentTarget
   const rect = el.getBoundingClientRect()
   dragging.value = true
@@ -295,8 +297,14 @@ const statusText = (task) => {
   z-index: 2600;
 }
 
+/* 拖动时面板不拦截指针事件，避免展开动画/阴影覆盖导致 FAB 拖不动 */
+.transfer-dock.is-dragging .tp-panel {
+  pointer-events: none;
+}
+
 .tp-fab {
   position: relative;
+  z-index: 10;
   width: 48px;
   height: 48px;
   border-radius: 50%;

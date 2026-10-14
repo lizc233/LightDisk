@@ -474,6 +474,8 @@ const startHls = async () => {
     })
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       applyQualityPreference()
+      // HLS 附着媒体后速率会被重置为 1.0，起播前必须重新应用用户选择的倍速
+      applyRate()
       el.play().catch(() => { playing.value = false })
     })
     hls.on(Hls.Events.LEVEL_SWITCHED, (_evt, data) => {
@@ -562,12 +564,31 @@ const setQuality = async (cmd) => {
   ElMessage.success(`已切换为 ${height}p`)
 }
 
+/**
+ * 统一应用倍速到 <video>。
+ *
+ * 关键点（修复「视频倍速调了没反应 / 进度条快了但画面仍是 1 倍」）：
+ *  1. 同时写 playbackRate 与 defaultPlaybackRate —— 后者决定「换源 / load() / HLS
+ *     重新附着媒体」后的初始速率。只写前者时，这些时机都会把速率重置回 1.0。
+ *  2. preservesPitch 必须显式设为 true，避免变速变调；部分内核需带前缀属性名。
+ *  3. HLS(MediaSource) 下同样有效：hls.js 只是换了个 source，<video> 仍由浏览器解码。
+ */
+const applyRate = () => {
+  const el = videoEl.value
+  if (!el) return
+  const v = PLAY_RATES.includes(Number(rate.value)) ? Number(rate.value) : 1
+  el.defaultPlaybackRate = v
+  el.playbackRate = v
+  if ('preservesPitch' in el) el.preservesPitch = true
+  else if ('mozPreservesPitch' in el) el.mozPreservesPitch = true
+  else if ('webkitPreservesPitch' in el) el.webkitPreservesPitch = true
+}
+
 const loadAndPlay = async () => {
   const el = videoEl.value
   if (!el) return
   el.volume = volume.value
-  el.playbackRate = rate.value
-  if ('preservesPitch' in el) el.preservesPitch = true
+  applyRate()
 
   // 每个文件新建一次 QoE 会话 + 并发流登记
   if (!qoe && current.value) {
@@ -581,6 +602,8 @@ const loadAndPlay = async () => {
   if (!isHls.value) {
     el.load()
   }
+  // load() / 换源会把速率重置为 1.0，这里在起播前再对齐一次
+  applyRate()
   const promise = el.play()
   if (promise && typeof promise.catch === 'function') {
     // 浏览器自动播放策略可能拦截，此时保留暂停态由用户点击
@@ -674,6 +697,7 @@ const onPlaying = () => {
 
 const onCanPlay = () => {
   buffering.value = false
+  applyRate()
   if (qoe) qoe.markFirstFrame()
 }
 
@@ -709,6 +733,8 @@ const onLoadedMetadata = () => {
   const el = videoEl.value
   if (!el) return
   duration.value = Number.isFinite(el.duration) ? el.duration : 0
+  // 元数据就绪后（换源/HLS 附着后）速率可能被重置，这里兜底再对齐一次
+  applyRate()
   if (pendingRestore) {
     pendingRestore = false
     restorePosition()
@@ -778,11 +804,8 @@ const setRate = async (value) => {
     }
   }
   rate.value = v
-  const el = videoEl.value
-  if (el) {
-    el.playbackRate = v
-    if ('preservesPitch' in el) el.preservesPitch = true
-  }
+  // 走统一的 applyRate：同时写 defaultPlaybackRate，避免后续 load()/切源被重置回 1.0
+  applyRate()
   scheduleHide()
 }
 

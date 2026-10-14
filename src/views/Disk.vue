@@ -275,7 +275,6 @@
                 </button>
 
                 <el-popover
-                  v-if="!row.isFolder"
                   placement="bottom-end"
                   trigger="hover"
                   :width="150"
@@ -286,6 +285,10 @@
                     </button>
                   </template>
 
+                  <button class="popover-action" @click.stop="openRenameDialog(row)">
+                    <el-icon><EditPen /></el-icon>
+                    <span>重命名</span>
+                  </button>
                   <button class="popover-action" @click.stop="openMoveDialog(row)">
                     <el-icon><FolderOpened /></el-icon>
                     <span>移入文件夹</span>
@@ -408,6 +411,37 @@
         <div class="dialog-footer">
           <el-button @click="shareDialogVisible = false">关闭</el-button>
           <el-button v-if="!shareResult" type="primary" :loading="sharing" @click="createShareLink">创建分享</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 重命名：只改用户视角的文件名，磁盘与存储位置完全不变 -->
+    <el-dialog
+      v-model="renameDialogVisible"
+      :title="renameTarget?.isFolder ? '重命名文件夹' : '重命名文件'"
+      width="440px"
+      destroy-on-close
+      @closed="onRenameDialogClosed"
+    >
+      <div class="rename-dialog-body">
+        <p class="rename-tip">
+          {{ renameTarget?.isFolder ? '仅修改文件夹名称，内部文件不受影响。' : '仅修改该文件在你网盘里的名称，存储位置与内容不变。' }}
+        </p>
+        <el-input
+          ref="renameInputRef"
+          v-model="renameValue"
+          maxlength="255"
+          show-word-limit
+          placeholder="请输入新名称"
+          @keyup.enter="submitRename"
+        />
+      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="renameDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="renaming" :disabled="!renameValue.trim()" @click="submitRename">
+            确认重命名
+          </el-button>
         </div>
       </template>
     </el-dialog>
@@ -631,6 +665,7 @@ import {
   Delete,
   Document,
   Download,
+  EditPen,
   Folder,
   FolderAdd,
   FolderOpened,
@@ -1888,6 +1923,58 @@ const openMoveDialog = async (row) => {
   folderTreeRef.value?.setCurrentKey(moveTargetFolderId.value)
 }
 
+// ===== 重命名（只改用户视角的名称，不碰磁盘与存储位置）=====
+const renameDialogVisible = ref(false)
+const renameTarget = ref(null)
+const renameValue = ref('')
+const renaming = ref(false)
+const renameInputRef = ref(null)
+
+const openRenameDialog = (row) => {
+  renameTarget.value = row
+  renameValue.value = row.name || ''
+  renameDialogVisible.value = true
+  nextTick(() => {
+    renameInputRef.value?.focus()
+    nextTick(() => renameInputRef.value?.select?.())
+  })
+}
+
+const onRenameDialogClosed = () => {
+  renameTarget.value = null
+  renameValue.value = ''
+}
+
+const submitRename = async () => {
+  const row = renameTarget.value
+  if (!row) return
+  const name = renameValue.value.trim()
+  if (!name) {
+    ElMessage.warning('名称不能为空')
+    return
+  }
+  if (name === row.name) {
+    renameDialogVisible.value = false
+    return
+  }
+  renaming.value = true
+  try {
+    if (row.isFolder) {
+      await request.put(`/folder/${row.id}/rename`, { name })
+    } else {
+      await request.put(`/file/${row.id}/rename`, { name })
+    }
+    ElMessage.success('重命名成功')
+    renameDialogVisible.value = false
+    scheduleListRefresh()
+  } catch (e) {
+    // 后端已给出明确原因（重名 / 含非法字符等），直接透出
+    ElMessage.error((e && e.message) || '重命名失败')
+  } finally {
+    renaming.value = false
+  }
+}
+
 const openBatchMoveDialog = async () => {
   if (!selected.value.length) return
   batchMoveMode.value = true
@@ -2438,6 +2525,19 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.rename-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rename-tip {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
 }
 
 .move-current-file {

@@ -51,12 +51,12 @@
 
       <section class="settings-card">
         <h3>上传偏好</h3>
-        <p class="card-desc">这个开关目前仍是前端偏好，后续如果做大文件断点续传，会继续沿用这套入口。</p>
+        <p class="card-desc">开启后，大于 5 MB 的文件会自动走分片上传，配合后端 Redis 记录分片索引实现断点续传与秒传。</p>
 
         <div class="setting-line">
           <div>
             <strong>分片上传</strong>
-            <p>为后续大文件分片与断点续传预留。</p>
+            <p>大文件自动分片，支持断点续传与秒传去重。</p>
           </div>
           <el-switch
             :model-value="preferencesStore.enableChunkUpload"
