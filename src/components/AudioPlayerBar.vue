@@ -38,7 +38,7 @@
 
     <audio
       ref="audioEl"
-      :src="player.currentTrack?.url || ''"
+      :src="currentUrl"
       preload="metadata"
       @timeupdate="onTimeUpdate"
       @loadedmetadata="onLoadedMetadata"
@@ -178,14 +178,21 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { Bell, Close, DArrowLeft, DArrowRight, Headset, Histogram, List, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { usePlayerStore, LOOP_MODES, PLAY_RATES } from '@/stores/player'
+import { usePlayerStore, LOOP_MODES, PLAY_RATES, buildTrackUrl } from '@/stores/player'
+import { buildAudioCoverUrl } from '@/api/audio'
 import { formatBytes, formatDuration } from '@/utils/format'
 import { QoeReporter } from '@/utils/qoe'
 
 const player = usePlayerStore()
 
-/** 当前曲目的流地址（判断 <audio> 是否已切到新源，避免在旧源上 play） */
-const currentUrl = computed(() => player.currentTrack?.url || '')
+/**
+ * 当前曲目的流地址（判断 <audio> 是否已切到新源，避免在旧源上 play）。
+ *
+ * 关键：按 track.id + 当前 token 现算，而不是直接用 track.url ——
+ * track.url 可能是持久化恢复出来的旧 token 地址（2 小时过期/重登失效），
+ * 直接用会让 <audio> 绕过 axios 拦截器吃 401，级联弹出「音频加载失败」。
+ */
+const currentUrl = computed(() => buildTrackUrl(player.currentTrack?.id))
 
 const audioEl = ref(null)
 const progressEl = ref(null)
@@ -195,7 +202,8 @@ const buffered = ref(0)
 // ===== 封面（ID3 APIC 内嵌图，后端按 MD5 缓存）=====
 const coverFailed = ref(false)
 const failedPanelCovers = reactive({})
-const coverSrc = computed(() => player.currentTrack?.coverUrl || '')
+// 与 currentUrl 同理：封面地址也按当前 token 现算，避免恢复列表后封面 401
+const coverSrc = computed(() => player.currentTrack?.id ? buildAudioCoverUrl(player.currentTrack.id) : '')
 const hasCover = computed(() => !!coverSrc.value)
 const panelCoverSrc = (item) => item.coverUrl || ''
 
@@ -376,7 +384,7 @@ const applyRate = () => {
 
 // 曲目切换：:src 绑定会自动触发浏览器重新加载，这里只需同步播放状态
 // （此前手动 load() 会 abort 掉播放 promise，把 AbortError 误判成自动播放拦截）
-watch(() => player.currentTrack?.url, () => {
+watch(currentUrl, () => {
   nextTick(() => {
     buffered.value = 0
     applyRate()

@@ -1,7 +1,21 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
+import { buildAudioCoverUrl } from '@/api/audio'
 
 const STORAGE_KEY = 'lightdisk.player.state'
+
+const readToken = () => localStorage.getItem('token') || localStorage.getItem('satoken') || ''
+
+/**
+ * 播放流地址必须用「当下」的 token 现算，绝不能直接复用持久化里存的 url。
+ *
+ * 原因：后端 token 有效期 2 小时，且重新登录会整体换新（单会话）。持久化播放
+ * 列表里若带着旧 token 的 url，下次打开页面恢复列表后，<audio>/<img> 不走
+ * axios 拦截器，旧 url 全部 401 → 每首歌都触发 onError →「音频加载失败，
+ * 已跳到下一首」级联刷屏。恢复列表时统一按当前 token 重建地址即可根治。
+ */
+export const buildTrackUrl = (id) =>
+  id ? `/api/file/preview/${id}?token=${encodeURIComponent(readToken())}` : ''
 
 /** 音频扩展名（与后端 category=audio 的过滤保持一致） */
 export const AUDIO_EXTS = ['mp3', 'flac', 'wav', 'aac', 'm4a', 'ogg', 'wma']
@@ -34,8 +48,11 @@ const readSaved = () => {
 export const usePlayerStore = defineStore('player', () => {
   const saved = readSaved()
 
-  /** 播放列表：[{ key, id, name, url, thumbUrl, size }] */
-  const playList = ref(Array.isArray(saved.playList) ? saved.playList : [])
+  /** 播放列表：[{ key, id, name, url, thumbUrl, size }]（url/coverUrl 恢复时按当前 token 重建） */
+  const reviveTrack = (t) => (t && t.id != null
+    ? { ...t, url: buildTrackUrl(t.id), coverUrl: buildAudioCoverUrl(t.id) }
+    : t)
+  const playList = ref(Array.isArray(saved.playList) ? saved.playList.map(reviveTrack) : [])
   const currentIndex = ref(Number.isInteger(saved.currentIndex) ? saved.currentIndex : -1)
   const playing = ref(false)
   const currentTime = ref(0)
@@ -61,7 +78,8 @@ export const usePlayerStore = defineStore('player', () => {
 
   const persist = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      playList: playList.value,
+      // url/coverUrl 内嵌 token，有效期只有 2 小时，不入库；恢复时按当前 token 现算
+      playList: playList.value.map(({ url, coverUrl, ...rest }) => rest),
       currentIndex: currentIndex.value,
       volume: volume.value,
       rate: rate.value,
