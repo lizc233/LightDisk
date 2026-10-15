@@ -249,35 +249,44 @@ let pickerTimer = null
 const searchMyFiles = async () => {
   pickerLoading.value = true
   try {
-    // 拉取当前用户的「全部文件」而不是仅最近 20 个 —— 否则老文件（哪怕名字完全匹配）也搜不到。
-    // 后端 /file/list 不带 keyword 参数，这里分页拉全量后在前端按关键词过滤。
-    const PAGE = 200
-    let pageNum = 1
+    const keyword = pickerKeyword.value.trim()
     let all = []
-    let total = 0
-    do {
+    if (!keyword) {
+      // 无关键词：只拉最近 20 个文件，快速展示（用户点开 + 号就能马上看到）
       const res = await request.post('/file/list', {
         folderId: 0,
-        pageNum,
-        pageSize: PAGE,
-        category: 'all'
+        pageNum: 1,
+        pageSize: 20,
+        category: 'all',
+        isRecent: true
       }, { silent: true })
-      const records = res.data?.records || []
-      total = res.data?.total || 0
-      all = all.concat(records.filter(item => item.type !== 'folder'))
-      pageNum += 1
-      if (all.length >= 2000) break // 保险上限，避免极端情况无限翻页
-    } while (all.length < total)
+      all = (res.data?.records || []).filter(item => item.type !== 'folder')
+    } else {
+      // 有关键词：走后端全盘搜索（后端按文件名模糊匹配），分页拉全量命中结果
+      const PAGE = 200
+      let pageNum = 1
+      let total = 0
+      do {
+        const res = await request.post('/file/list', {
+          folderId: 0,
+          pageNum,
+          pageSize: PAGE,
+          category: 'all',
+          keyword
+        }, { silent: true })
+        const records = res.data?.records || []
+        total = res.data?.total || 0
+        all = all.concat(records.filter(item => item.type !== 'folder'))
+        pageNum += 1
+        if (all.length >= 2000) break
+      } while (all.length < total)
+    }
 
-    const keyword = pickerKeyword.value.trim().toLowerCase()
-    const rows = all.map(item => ({
+    pickerFiles.value = all.map(item => ({
       fileId: item.id,
       name: item.name,
       sizeText: item.size != null ? formatSizeShort(item.size) : ''
     }))
-    pickerFiles.value = keyword
-      ? rows.filter(f => f.name.toLowerCase().includes(keyword))
-      : rows
   } catch (e) {
     pickerFiles.value = []
   } finally {
