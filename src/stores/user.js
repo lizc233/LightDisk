@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { usePlayerStore } from '@/stores/player'
+import { usePreferencesStore } from '@/stores/preferences'
 import { clearUploadQueue } from '@/utils/uploadQueue'
 
 /** 播放器持久化键前缀（实际键为 lightdisk.player.state.<userId>） */
@@ -25,8 +26,7 @@ const resetPlayerState = () => {
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('token') || '')
-  const PREFERENCES_KEY = 'lightdisk_preferences'
-  
+
   let savedInfo = {}
   try {
     const raw = localStorage.getItem('userInfo')
@@ -57,16 +57,11 @@ export const useUserStore = defineStore('user', () => {
     userInfo.value = {}
     localStorage.removeItem('token')
     localStorage.removeItem('userInfo')
+    // 主题是全局偏好，但属于「上一个账号的选择」——登出后重置为明亮，并同步内存 store，
+    // 否则换账号登录后顶栏仍读着上个账号的 isDark，出现「B 是明亮主题却显示黑暗主题」。
     try {
-      const rawPreferences = localStorage.getItem(PREFERENCES_KEY)
-      const nextPreferences = rawPreferences ? JSON.parse(rawPreferences) : {}
-      nextPreferences.theme = 'light'
-      localStorage.setItem(PREFERENCES_KEY, JSON.stringify(nextPreferences))
+      usePreferencesStore().setTheme('light')
     } catch (e) {}
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.remove('dark')
-      document.documentElement.setAttribute('data-theme', 'light')
-    }
   }
 
   return { token, userInfo, setToken, setUserInfo, logout }

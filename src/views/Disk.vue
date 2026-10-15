@@ -1813,6 +1813,11 @@ let listRefreshTimer = null
 const scheduleListRefresh = () => {
   clearTimeout(listRefreshTimer)
   listRefreshTimer = setTimeout(() => {
+    // 名称排序下，新上传/重命名的文件按名称序可能被排到第 1 页，
+    // 若仍停在当前页（例如第 2 页）就会「看不到新文件」。回第 1 页再刷新。
+    if (useNameSort.value) {
+      currentPage.value = 1
+    }
     loadFileList()
   }, 450)
 }

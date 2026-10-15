@@ -32,7 +32,7 @@
             />
             <div class="bubble">
               <div class="bubble-role">{{ msg.role === 'user' ? '你' : 'LightDisk AI' }}</div>
-              <div class="bubble-content" v-html="msg.content"></div>
+              <div class="bubble-content" :class="{ 'is-md': msg.role === 'ai' }" v-html="renderMessage(msg)"></div>
             </div>
           </div>
 
@@ -175,6 +175,7 @@ import { ElMessage } from 'element-plus'
 import { CircleCloseFilled, Document, MagicStick, Plus, Search, User } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import { useUserStore } from '@/stores/user'
+import { renderMarkdown } from '@/utils/markdown'
 import CloudPet from '@/components/CloudPet.vue'
 
 const userStore = useUserStore()
@@ -223,6 +224,16 @@ const resetConversation = () => {
   messageList.value = [welcomeMessage()]
 }
 
+/**
+ * 消息内容 → HTML。
+ * AI 回答后端返回的是 Markdown 文本，需渲染成 HTML（否则 **加粗** / - 列表 / # 标题 原样显示，显得杂乱）；
+ * 用户消息可能内嵌了文件标记（<span class="msg-file-tag">），保持原样 v-html。
+ */
+const renderMessage = (msg) => {
+  if (msg.role === 'ai') return renderMarkdown(msg.content || '')
+  return msg.content || ''
+}
+
 const insertPrompt = (prompt) => {
   inputText.value = prompt
 }
@@ -238,22 +249,32 @@ let pickerTimer = null
 const searchMyFiles = async () => {
   pickerLoading.value = true
   try {
-    const res = await request.post('/file/list', {
-      folderId: 0,
-      pageNum: 1,
-      pageSize: 20,
-      category: 'all',
-      isRecent: true
-    })
-    const records = res.data?.records || []
+    // 拉取当前用户的「全部文件」而不是仅最近 20 个 —— 否则老文件（哪怕名字完全匹配）也搜不到。
+    // 后端 /file/list 不带 keyword 参数，这里分页拉全量后在前端按关键词过滤。
+    const PAGE = 200
+    let pageNum = 1
+    let all = []
+    let total = 0
+    do {
+      const res = await request.post('/file/list', {
+        folderId: 0,
+        pageNum,
+        pageSize: PAGE,
+        category: 'all'
+      }, { silent: true })
+      const records = res.data?.records || []
+      total = res.data?.total || 0
+      all = all.concat(records.filter(item => item.type !== 'folder'))
+      pageNum += 1
+      if (all.length >= 2000) break // 保险上限，避免极端情况无限翻页
+    } while (all.length < total)
+
     const keyword = pickerKeyword.value.trim().toLowerCase()
-    const rows = records
-      .filter(item => item.type !== 'folder')
-      .map(item => ({
-        fileId: item.id,
-        name: item.name,
-        sizeText: item.size != null ? formatSizeShort(item.size) : ''
-      }))
+    const rows = all.map(item => ({
+      fileId: item.id,
+      name: item.name,
+      sizeText: item.size != null ? formatSizeShort(item.size) : ''
+    }))
     pickerFiles.value = keyword
       ? rows.filter(f => f.name.toLowerCase().includes(keyword))
       : rows
@@ -875,5 +896,71 @@ onBeforeUnmount(() => {
   .message-row {
     max-width: 100%;
   }
+}
+</style>
+
+<!-- AI 回答经 Markdown 渲染后的排版样式：v-html 内容不受 scoped 限制，用容器选择器约束，并适配主题变量 -->
+<style>
+.bubble-content.is-md p {
+  margin: 6px 0;
+}
+.bubble-content.is-md h1.md-h,
+.bubble-content.is-md h2.md-h,
+.bubble-content.is-md h3.md-h,
+.bubble-content.is-md h4.md-h,
+.bubble-content.is-md h5.md-h,
+.bubble-content.is-md h6.md-h {
+  margin: 14px 0 8px;
+  line-height: 1.4;
+}
+.bubble-content.is-md h1.md-h {
+  font-size: 20px;
+  border-bottom: 1px solid var(--border-color, #ebeef5);
+  padding-bottom: 6px;
+}
+.bubble-content.is-md h2.md-h {
+  font-size: 18px;
+  border-bottom: 1px solid var(--border-color, #ebeef5);
+  padding-bottom: 6px;
+}
+.bubble-content.is-md ul,
+.bubble-content.is-md ol {
+  padding-left: 22px;
+  margin: 6px 0;
+}
+.bubble-content.is-md li {
+  margin: 2px 0;
+}
+.bubble-content.is-md .md-quote {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--border-color, #dcdfe6);
+  color: var(--text-secondary, #606266);
+  background: var(--surface-muted, #fafafa);
+}
+.bubble-content.is-md .md-code {
+  background: var(--surface-muted, #f7f8fa);
+  border: 1px solid var(--border-color, #ebeef5);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow: auto;
+  font-size: 12px;
+}
+.bubble-content.is-md .md-inline-code {
+  background: var(--surface-muted, #f2f3f5);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 13px;
+}
+.bubble-content.is-md .md-hr {
+  border: none;
+  border-top: 1px solid var(--border-color, #ebeef5);
+  margin: 12px 0;
+}
+.bubble-content.is-md a {
+  color: var(--accent, #409eff);
+}
+.bubble-content.is-md strong {
+  font-weight: 600;
 }
 </style>
