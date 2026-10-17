@@ -214,7 +214,7 @@ import { ElMessage } from 'element-plus'
 import { formatDuration } from '@/utils/format'
 import { PLAY_RATES } from '@/stores/player'
 import { QoeReporter } from '@/utils/qoe'
-import { fetchPlaybackInfo, checkQuality, checkRate, acquireStream, releaseStream, buildHlsUrl } from '@/api/video'
+import { fetchPlaybackInfo, submitTranscode, checkQuality, checkRate, acquireStream, releaseStream, buildHlsUrl } from '@/api/video'
 
 const props = defineProps({
   /** 当前要播放的文件：{ key, id, name, size, url } */
@@ -259,6 +259,30 @@ const currentQualityHeight = ref(0)
 let qoe = null
 let acquireTimer = null
 let transcodePollTimer = null
+
+// 打开视频时若发现「还没有转码任务」，需要主动补提交一次。
+// 后端 submit() 是幂等的（已有 QUEUED/RUNNING/DONE 任务会直接复用），
+// 所以重复调用安全；这里用集合去重，避免同一个文件反复提交。
+const autoSubmitted = new Set()
+// 轮询上限：5s 一次 × 240 = 20 分钟，避免任务永远不落地时无限轮询
+let transcodePollCount = 0
+const TRANSCODE_POLL_MAX = 240
+
+/**
+ * 补提交转码。
+ * 背景：任务不存在时后端返回 status=null，而 Number(null)===0 会被当成「排队中」，
+ * 于是播放器显示「正在转码 0%」并永久轮询 —— 实际上根本没人去提交任务。
+ */
+const ensureTranscodeSubmitted = async (fileId) => {
+  if (!fileId || autoSubmitted.has(fileId)) return
+  autoSubmitted.add(fileId)
+  try {
+    await submitTranscode(fileId)
+  } catch (e) {
+    // 提交失败也允许后续再次尝试
+    autoSubmitted.delete(fileId)
+  }
+}
 
 /** video 标签的真实地址：HLS 就绪用 m3u8，否则回退原文件直连 */
 const videoSrc = computed(() => {
@@ -405,12 +429,22 @@ const preparePlayback = async () => {
     }
     // 未就绪：先直连原文件播，同时后台轮询转码进度
     isHls.value = false
-    const status = Number(data.status)
+    const rawStatus = data.status
+    const status = rawStatus === null || rawStatus === undefined ? null : Number(rawStatus)
+    transcodePollCount = 0
     if (status === 0 || status === 1) {
       transcodeHint.value = `正在转码 ${data.progress || 0}%，当前为原画质播放`
       scheduleTranscodePoll()
     } else if (status === 3) {
-      transcodeHint.value = '转码失败，当前为原画质播放'
+      // 失败：允许重新提交一次（后端幂等，FAILED 会重建任务）
+      transcodeHint.value = '正在重新提交转码，当前为原画质播放'
+      ensureTranscodeSubmitted(fileId)
+      scheduleTranscodePoll()
+    } else {
+      // status 为 null = 从未提交过（老视频 / 上传时自动提交失败）→ 主动补提交
+      transcodeHint.value = '正在启动转码，当前为原画质播放'
+      ensureTranscodeSubmitted(fileId)
+      scheduleTranscodePoll()
     }
   } catch (e) {
     /* 静默：接口异常时按直连原文件播放 */
@@ -420,6 +454,11 @@ const preparePlayback = async () => {
 
 const scheduleTranscodePoll = () => {
   if (transcodePollTimer) return
+  transcodePollCount += 1
+  if (transcodePollCount > TRANSCODE_POLL_MAX) {
+    transcodeHint.value = '转码超时，当前为原画质播放'
+    return
+  }
   transcodePollTimer = setTimeout(async () => {
     transcodePollTimer = null
     if (!visible.value || !current.value) return
@@ -435,15 +474,25 @@ const scheduleTranscodePoll = () => {
         setTimeout(() => { transcodeHint.value = '' }, 2600)
         return
       }
-      const status = Number(data.status)
+      const rawStatus = data.status
+      const status = rawStatus === null || rawStatus === undefined ? null : Number(rawStatus)
       if (status === 0 || status === 1) {
         transcodeHint.value = `正在转码 ${data.progress || 0}%，当前为原画质播放`
         scheduleTranscodePoll()
       } else if (status === 3) {
         transcodeHint.value = '转码失败，当前为原画质播放'
+      } else if (status === null) {
+        // 仍无任务 → 再补提交一次（幂等），并受轮询上限保护
+        if (transcodePollCount < TRANSCODE_POLL_MAX) {
+          ensureTranscodeSubmitted(current.value.id)
+          transcodeHint.value = '正在启动转码，当前为原画质播放'
+          scheduleTranscodePoll()
+        } else {
+          transcodeHint.value = '转码启动超时，当前为原画质播放'
+        }
       }
     } catch (e) {
-      scheduleTranscodePoll()
+      if (transcodePollCount < TRANSCODE_POLL_MAX) scheduleTranscodePoll()
     }
   }, 5000)
 }
