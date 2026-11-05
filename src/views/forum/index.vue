@@ -152,12 +152,18 @@
       </div>
       <div v-loading="fileLoading" class="picker-list">
         <el-checkbox-group v-model="pickedIds">
-          <label v-for="f in pickerFiles" :key="f.id" class="picker-item" :class="{ picked: pickedIds.includes(f.id) }">
-            <el-checkbox :value="f.id" />
-            <span class="picker-ext">{{ extOf(f.name) }}</span>
-            <span class="picker-name">{{ f.name }}</span>
-            <span class="picker-size">{{ formatBytes(f.size) }}</span>
-          </label>
+          <div
+            v-for="f in pickerFiles"
+            :key="f.id"
+            class="picker-item"
+            :class="{ picked: pickedIds.includes(f.id) }"
+          >
+            <el-checkbox :value="f.id" class="picker-check">
+              <span class="picker-ext">{{ extOf(f.name) }}</span>
+              <span class="picker-name">{{ f.name }}</span>
+              <span class="picker-size">{{ formatBytes(f.size) }}</span>
+            </el-checkbox>
+          </div>
         </el-checkbox-group>
         <el-empty
           v-if="!fileLoading && pickerFiles.length === 0"
@@ -666,13 +672,9 @@ defineExpose({ openCreate })
 }
 
 .picker-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 8px;
+  padding: 6px 8px;
   border-radius: 8px;
   border-bottom: 1px solid var(--border-color);
-  cursor: pointer;
   transition: background .15s ease;
 }
 
@@ -682,6 +684,21 @@ defineExpose({ openCreate })
 
 .picker-item.picked {
   background: var(--accent-soft);
+}
+
+.picker-check {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  height: auto;
+}
+
+.picker-check :deep(.el-checkbox__label) {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .picker-ext {
@@ -700,7 +717,9 @@ defineExpose({ openCreate })
 
 .picker-name {
   flex: 1;
+  min-width: 0;
   font-size: 13px;
+  color: var(--el-text-color-primary, #303133);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
