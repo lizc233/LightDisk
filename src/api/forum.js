@@ -40,7 +40,7 @@ export function toggleFavorite(postId) {
   return request.post('/forum/favorite', { postId })
 }
 
-/** 我网盘根目录的文件，用于选择附件 */
-export function listMyFiles() {
-  return request.post('/file/list', { folderId: 0, pageNum: 1, pageSize: 100 })
+/** 我的网盘文件，用于选择附件；传 keyword 时全盘按文件名搜索 */
+export function listMyFiles(data) {
+  return request.post('/file/list', { pageNum: 1, pageSize: 100, ...data })
 }

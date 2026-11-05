@@ -1,13 +1,25 @@
 <template>
   <div class="forum-page">
-    <PageHeader eyebrow="Community" title="资料社区" sub="同学分享的课件、笔记与复习资料，收藏即自动存入你的网盘，零拷贝不占额外空间。">
-      <template #actions>
-        <el-button type="primary" class="publish-btn" @click="openCreate()">
-          <el-icon><EditPen /></el-icon>
-          <span>发帖分享</span>
-        </el-button>
-      </template>
-    </PageHeader>
+    <header class="forum-hero">
+      <span class="shard shard-a" aria-hidden="true"></span>
+      <span class="shard shard-b" aria-hidden="true"></span>
+      <span class="shard shard-c" aria-hidden="true"></span>
+      <div class="hero-body">
+        <p class="hero-eyebrow">CAMPUS MATERIAL HUB</p>
+        <h2 class="hero-title">资料社区</h2>
+        <p class="hero-sub">
+          同学分享的课件、笔记与复习资料。收藏即自动存入你的网盘，
+          <span class="hero-strong">零拷贝、不占额外空间</span>。
+        </p>
+        <div class="hero-actions">
+          <button class="hero-publish" @click="openCreate()">
+            <el-icon><EditPen /></el-icon>
+            <span>发帖分享</span>
+          </button>
+          <span class="hero-stat">已有 {{ total }} 帖在流传</span>
+        </div>
+      </div>
+    </header>
 
     <div class="forum-toolbar">
       <el-tabs v-model="activeTab" class="forum-tabs" @tab-change="handleTabChange">
@@ -37,6 +49,7 @@
         v-for="post in posts"
         :key="post.id"
         class="post-card"
+        :class="catClass(post.category, post.postType)"
         @click="goDetail(post.id)"
       >
         <div class="post-card-head">
@@ -121,16 +134,36 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="pickerVisible" title="选择附件（来自我的网盘根目录）" width="560px">
+    <el-dialog v-model="pickerVisible" title="选择附件（来自我的网盘）" width="600px">
+      <el-input
+        v-model="fileKeyword"
+        class="picker-search"
+        placeholder="输入文件名，搜索我网盘中的所有文件"
+        clearable
+        @keyup.enter="reloadPicker"
+        @clear="reloadPicker"
+      >
+        <template #append>
+          <el-button @click="reloadPicker"><el-icon><Search /></el-icon></el-button>
+        </template>
+      </el-input>
+      <div class="picker-hint">
+        {{ fileKeyword.trim() ? `全盘搜索“${fileKeyword.trim()}”的结果` : '当前显示根目录文件，输入关键词可搜索所有文件夹' }}
+      </div>
       <div v-loading="fileLoading" class="picker-list">
         <el-checkbox-group v-model="pickedIds">
-          <label v-for="f in myFiles" :key="f.id" class="picker-item">
+          <label v-for="f in pickerFiles" :key="f.id" class="picker-item" :class="{ picked: pickedIds.includes(f.id) }">
             <el-checkbox :value="f.id" />
+            <span class="picker-ext">{{ extOf(f.name) }}</span>
             <span class="picker-name">{{ f.name }}</span>
             <span class="picker-size">{{ formatBytes(f.size) }}</span>
           </label>
         </el-checkbox-group>
-        <el-empty v-if="!fileLoading && myFiles.length === 0" description="网盘根目录还没有文件" :image-size="60" />
+        <el-empty
+          v-if="!fileLoading && pickerFiles.length === 0"
+          :description="fileKeyword.trim() ? '没有匹配的文件' : '网盘里还没有文件'"
+          :image-size="60"
+        />
       </div>
       <template #footer>
         <el-button @click="pickerVisible = false">取消</el-button>
@@ -144,7 +177,6 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import PageHeader from '@/components/PageHeader.vue'
 import { createPost, getFeed, listMyFiles } from '@/api/forum'
 import { formatRelativeTime } from '@/utils/datetime'
 import { formatBytes } from '@/utils/format'
@@ -175,6 +207,9 @@ const pickerVisible = ref(false)
 const fileLoading = ref(false)
 const myFiles = ref([])
 const pickedIds = ref([])
+const fileKeyword = ref('')
+
+const pickerFiles = computed(() => myFiles.value.filter((f) => f.type === 'file'))
 
 const fileMap = computed(() => {
   const map = {}
@@ -182,9 +217,31 @@ const fileMap = computed(() => {
   return map
 })
 
+const pickedNames = ref({})
+
 function fileNameOf(id) {
+  if (pickedNames.value[id]) return pickedNames.value[id]
   const f = fileMap.value[id]
   return f ? f.name : `文件#${id}`
+}
+
+function extOf(name) {
+  if (!name) return '?'
+  const dot = name.lastIndexOf('.')
+  const ext = dot >= 0 ? name.slice(dot + 1) : name
+  return (ext.length > 4 ? ext.slice(0, 4) : ext).toUpperCase()
+}
+
+const CAT_CLASS = {
+  '课程资料': 'cat-course',
+  '考研': 'cat-exam',
+  '竞赛': 'cat-contest',
+  '求助': 'cat-help',
+}
+
+function catClass(category, postType) {
+  if (postType === 1) return 'cat-help'
+  return CAT_CLASS[category] || 'cat-other'
 }
 
 function buildQuery() {
@@ -240,17 +297,30 @@ function removeFile(id) {
 async function openPicker() {
   pickerVisible.value = true
   pickedIds.value = [...form.fileIds]
-  if (myFiles.value.length) return
+  await loadPickerFiles()
+}
+
+async function loadPickerFiles() {
   fileLoading.value = true
   try {
-    const res = await listMyFiles()
+    const kw = fileKeyword.value.trim()
+    // 有关键词走全盘文件名搜索（忽略 folderId）；否则列出根目录
+    const res = await listMyFiles(kw ? { keyword: kw } : { folderId: 0 })
     myFiles.value = res.data?.records || []
   } finally {
     fileLoading.value = false
   }
 }
 
+function reloadPicker() {
+  loadPickerFiles()
+}
+
 function confirmPick() {
+  // 记录已选文件名，避免后续搜索替换列表后 chip 显示成「文件#id」
+  pickerFiles.value.forEach((f) => {
+    if (pickedIds.value.includes(f.id)) pickedNames.value[f.id] = f.name
+  })
   form.fileIds = [...pickedIds.value]
   pickerVisible.value = false
 }
@@ -287,10 +357,133 @@ defineExpose({ openCreate })
   padding: 4px;
 }
 
-.publish-btn {
+/* ===== 深色玻璃 hero ===== */
+.forum-hero {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 16px;
+  padding: 34px 38px;
+  border-radius: 18px;
+  background:
+    radial-gradient(560px 240px at 88% -30%, rgba(103, 90, 210, .38), transparent 65%),
+    radial-gradient(420px 200px at 70% 120%, rgba(54, 214, 126, .12), transparent 60%),
+    linear-gradient(135deg, #101014 0%, #17171f 58%, #1c1c28 100%);
+  color: #fff;
+}
+
+/* 悬浮玻璃碎片装饰 */
+.shard {
+  position: absolute;
+  background: linear-gradient(150deg, rgba(255, 255, 255, .14), rgba(255, 255, 255, .03));
+  border: 1px solid rgba(255, 255, 255, .16);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .18);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.shard-a {
+  width: 150px;
+  height: 110px;
+  right: 150px;
+  top: -34px;
+  clip-path: polygon(18% 0, 100% 12%, 82% 100%, 0 72%);
+  transform: rotate(14deg);
+  animation: shard-float 9s ease-in-out infinite;
+}
+
+.shard-b {
+  width: 96px;
+  height: 84px;
+  right: 46px;
+  bottom: -26px;
+  clip-path: polygon(0 22%, 88% 0, 100% 78%, 12% 100%);
+  transform: rotate(-10deg);
+  animation: shard-float 12s ease-in-out 1.2s infinite;
+}
+
+.shard-c {
+  width: 56px;
+  height: 50px;
+  right: 320px;
+  bottom: 12px;
+  clip-path: polygon(12% 6%, 96% 20%, 70% 96%, 0 64%);
+  transform: rotate(24deg);
+  opacity: .65;
+  animation: shard-float 10s ease-in-out 2.1s infinite;
+}
+
+@keyframes shard-float {
+  0%, 100% { translate: 0 0; rotate: 0deg; }
+  50% { translate: 0 -9px; rotate: 2.5deg; }
+}
+
+.hero-body {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-eyebrow {
+  margin: 0 0 10px;
+  font-size: 11px;
+  letter-spacing: .22em;
+  color: rgba(255, 255, 255, .42);
+}
+
+.hero-title {
+  margin: 0;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  background: linear-gradient(180deg, #e6e6ec, #b9b9c4);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero-sub {
+  margin: 10px 0 0;
+  max-width: 560px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: rgba(255, 255, 255, .62);
+}
+
+.hero-strong {
+  color: rgba(255, 255, 255, .92);
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.hero-publish {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  padding: 9px 22px;
+  border: none;
+  border-radius: 999px;
+  background: #f2f2f5;
+  color: #17171b;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+
+.hero-publish:hover {
+  background: #36d67e;
+  color: #04140b;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(54, 214, 126, .35);
+}
+
+.hero-stat {
+  font-size: 12px;
+  color: rgba(255, 255, 255, .4);
 }
 
 .forum-toolbar {
@@ -314,18 +507,38 @@ defineExpose({ openCreate })
 }
 
 .post-card {
-  padding: 16px 18px;
+  position: relative;
+  padding: 16px 18px 16px 21px;
   margin-bottom: 12px;
   border: 1px solid var(--border-color);
   border-radius: 12px;
   background: var(--surface-solid);
   cursor: pointer;
-  transition: border-color .18s ease, transform .18s ease;
+  overflow: hidden;
+  transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
 }
+
+/* 分类色条 */
+.post-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--cat-color, transparent);
+}
+
+.post-card.cat-course { --cat-color: #4f7cf0; }
+.post-card.cat-exam { --cat-color: #8b5cf6; }
+.post-card.cat-contest { --cat-color: #f59e0b; }
+.post-card.cat-help { --cat-color: #ef5350; }
+.post-card.cat-other { --cat-color: #90a4ae; }
 
 .post-card:hover {
   border-color: var(--accent);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 22px rgba(79, 124, 240, .10);
 }
 
 .post-card-head {
@@ -437,8 +650,18 @@ defineExpose({ openCreate })
   color: var(--text-secondary);
 }
 
+.picker-search {
+  margin-bottom: 8px;
+}
+
+.picker-hint {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .picker-list {
-  max-height: 320px;
+  max-height: 340px;
   overflow-y: auto;
 }
 
@@ -446,9 +669,33 @@ defineExpose({ openCreate })
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 4px;
+  padding: 8px 8px;
+  border-radius: 8px;
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
+  transition: background .15s ease;
+}
+
+.picker-item:hover {
+  background: var(--surface-muted);
+}
+
+.picker-item.picked {
+  background: var(--accent-soft);
+}
+
+.picker-ext {
+  flex-shrink: 0;
+  min-width: 40px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-color);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--text-secondary);
+  text-align: center;
 }
 
 .picker-name {
