@@ -42,6 +42,16 @@ const routes = [
         component: () => import('@/views/share/index.vue')
       },
       {
+        path: 'forum',
+        name: 'Forum',
+        component: () => import('@/views/forum/index.vue')
+      },
+      {
+        path: 'forum/:id',
+        name: 'ForumDetail',
+        component: () => import('@/views/forum/detail.vue')
+      },
+      {
         path: 'recycle',
         name: 'Recycle',
         component: () => import('@/views/recycle/index.vue')

@@ -15,6 +15,10 @@
           <el-icon><Share /></el-icon>
           <span>我的分享</span>
         </el-menu-item>
+        <el-menu-item index="/app/forum">
+          <el-icon><Reading /></el-icon>
+          <span>资料社区</span>
+        </el-menu-item>
         <el-menu-item index="/app/recycle">
           <el-icon><Delete /></el-icon>
           <el-badge :value="recycleReminderCount" :hidden="recycleReminderCount <= 0" class="menu-badge">
@@ -298,7 +302,12 @@ onMounted(() => {
   fetchNotices()
 })
 
-const activeMenu = computed(() => route.path)
+const activeMenu = computed(() => {
+  const path = route.path
+  // 社区详情页 /app/forum/:id 仍高亮「资料社区」
+  if (path.startsWith('/app/forum')) return '/app/forum'
+  return path
+})
 
 // ===== 通知系统 =====
 const notices = ref([])
