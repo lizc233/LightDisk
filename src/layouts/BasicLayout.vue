@@ -15,9 +15,10 @@
           <el-icon><Share /></el-icon>
           <span>我的分享</span>
         </el-menu-item>
-        <el-menu-item index="/app/forum">
+        <el-menu-item index="/app/forum" class="forum-menu-entry">
           <el-icon><Reading /></el-icon>
           <span>资料社区</span>
+          <span class="community-chip">CAMPUS</span>
         </el-menu-item>
         <el-menu-item index="/app/recycle">
           <el-icon><Delete /></el-icon>
@@ -451,6 +452,38 @@ watch(showNotificationPanel, (visible) => {
   background: linear-gradient(135deg, var(--accent), #19c37d) !important;
   color: #fff !important;
   box-shadow: 0 10px 24px rgba(16, 163, 127, 0.22);
+}
+
+.side-menu :deep(.forum-menu-entry) {
+  position: relative;
+}
+
+.side-menu :deep(.forum-menu-entry:hover) {
+  background: rgba(109, 92, 231, 0.1) !important;
+  color: #6d5ce7;
+}
+
+.side-menu :deep(.forum-menu-entry.is-active) {
+  background: linear-gradient(135deg, #6354d9, #8576ed) !important;
+  box-shadow: 0 10px 24px rgba(109, 92, 231, 0.24);
+}
+
+.community-chip {
+  margin-left: auto;
+  padding: 3px 6px;
+  border: 1px solid rgba(109, 92, 231, 0.2);
+  border-radius: 999px;
+  background: rgba(109, 92, 231, 0.1);
+  color: #6d5ce7;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.side-menu :deep(.forum-menu-entry.is-active) .community-chip {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
 }
 
 /* 后台管理可折叠分组：标题行与普通菜单项同款观感 */
